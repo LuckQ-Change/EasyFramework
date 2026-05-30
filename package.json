@@ -1,0 +1,28 @@
+{
+  "name": "com.wjq.easyframework",
+  "version": "0.0.1",
+  "displayName": "EasyFramework",
+  "description": "一款简易的 Unity 游戏框架，包含核心入口、事件、对象池、工具、网络、资源（YooAsset）、热更（HybridCLR）等模块。",
+  "unity": "2022.3",
+  "unityRelease": "0b5",
+  "documentationUrl": "",
+  "changelogUrl": "",
+  "licensesUrl": "",
+  "dependencies": {},
+  "keywords": [
+    "framework",
+    "unity",
+    "hotfix",
+    "hybridclr",
+    "yooasset",
+    "network",
+    "event",
+    "pool",
+    "easy"
+  ],
+  "author": {
+    "name": "WJQ",
+    "email": "wujiaqing2020w@163.com",
+    "url": "https://github.com/LuckQ-Change/EasyFramework"
+  }
+}
