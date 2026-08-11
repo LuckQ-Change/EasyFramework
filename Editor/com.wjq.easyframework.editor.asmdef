@@ -1,3 +1,9 @@
 {
-	"name": "com.wjq.easyframework"
+  "name": "com.wjq.easyframework.editor",
+  "references": [
+    "com.wjq.easyframework.runtime"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ]
 }

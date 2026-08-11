@@ -5,13 +5,13 @@ namespace EasyFramework
 {
     public static class EasyFrameworkBootstrap
     {
-#if !EASY_NO_AUTO_BOOTSTRAP
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         private static void ResetState()
         {
             ModuleRegistry.ClearRegistrars();
         }
 
+#if !EASY_NO_AUTO_BOOTSTRAP
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
         private static void AutoStart()
         {

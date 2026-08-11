@@ -10,7 +10,21 @@ namespace EasyFramework
         public static void AddRegistrar(Action<ModuleManager> registrar)
         {
             if (registrar == null) return;
+            if (_extraRegistrars.Contains(registrar)) return;
             _extraRegistrars.Add(registrar);
+
+            if (EasyEntry.IsRunning)
+            {
+                try
+                {
+                    EasyEntry.Install(registrar);
+                }
+                catch
+                {
+                    _extraRegistrars.Remove(registrar);
+                    throw;
+                }
+            }
         }
 
         public static void ClearRegistrars()
@@ -24,8 +38,7 @@ namespace EasyFramework
             RegisterDefault(modules);
             for (int i = 0; i < _extraRegistrars.Count; i++)
             {
-                try { _extraRegistrars[i](modules); }
-                catch (Exception ex) { Log.Error($"[ModuleRegistry] registrar #{i} error: {ex}"); }
+                _extraRegistrars[i](modules);
             }
         }
 
@@ -35,9 +48,6 @@ namespace EasyFramework
             modules.Register<EventModule>();
             modules.Register<TimerModule>();
             modules.Register<PoolModule>();
-            modules.Register<AssetModule>();
-            modules.Register<NetworkModule>();
-            modules.Register<HotfixModule>();
         }
     }
 }
