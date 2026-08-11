@@ -1,13 +1,12 @@
 {
   "name": "com.wjq.easyframework",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "displayName": "EasyFramework",
-  "description": "一款简易的 Unity 游戏框架，包含核心入口、事件、对象池、工具、网络、资源（YooAsset）、热更（HybridCLR）等模块。",
+  "description": "一款轻量 Unity 游戏框架，提供确定的模块生命周期、事件、定时器、对象池，以及按需启用的网络、资源和热更适配。",
   "unity": "2022.3",
-  "unityRelease": "0b5",
-  "documentationUrl": "",
-  "changelogUrl": "",
-  "licensesUrl": "",
+  "unityRelease": "0f1",
+  "documentationUrl": "https://github.com/LuckQ-Change/EasyFramework#readme",
+  "changelogUrl": "https://github.com/LuckQ-Change/EasyFramework/blob/main/CHANGELOG.md",
   "dependencies": {},
   "keywords": [
     "framework",
@@ -24,5 +23,9 @@
     "name": "WJQ",
     "email": "wujiaqing2020w@163.com",
     "url": "https://github.com/LuckQ-Change/EasyFramework"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/LuckQ-Change/EasyFramework.git"
   }
 }

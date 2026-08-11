@@ -55,6 +55,13 @@ namespace EasyFramework
                     return;
                 }
             }
+
+            foreach (var timer in _pending)
+            {
+                if (timer.Id != id) continue;
+                timer.Canceled = true;
+                return;
+            }
         }
 
         public void CancelAll()
@@ -63,6 +70,7 @@ namespace EasyFramework
             {
                 _timers[i].Canceled = true;
             }
+            foreach (var timer in _pending) timer.Canceled = true;
         }
 
         protected override void OnUpdate(float deltaTime)
@@ -111,6 +119,7 @@ namespace EasyFramework
         {
             _timers.Clear();
             _pending.Clear();
+            _ticking = false;
         }
     }
 }

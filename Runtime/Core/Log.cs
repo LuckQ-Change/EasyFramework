@@ -27,7 +27,8 @@ namespace EasyFramework
         private static void Write(LogLevel level, string msg)
         {
             if (level < MinLevel) return;
-            Handler?.Invoke(level, msg);
+            try { Handler?.Invoke(level, msg); }
+            catch { }
         }
     }
 }

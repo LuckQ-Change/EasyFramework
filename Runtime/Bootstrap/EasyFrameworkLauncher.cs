@@ -22,8 +22,7 @@ namespace EasyFramework
             DontDestroyOnLoad(gameObject);
 
             RedirectLogToUnity();
-            EasyEntry.Init();
-            ModuleRegistry.ApplyAll(EasyEntry.Modules);
+            EasyEntry.Init(ModuleRegistry.ApplyAll);
         }
 
         private void Update()
