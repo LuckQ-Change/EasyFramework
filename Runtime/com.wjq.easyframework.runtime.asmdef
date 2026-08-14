@@ -1,3 +1,6 @@
 {
-	"name": "com.wjq.easyframework.runtime"
+  "name": "com.wjq.easyframework.runtime",
+  "references": [
+    "Unity.ugui"
+  ]
 }
