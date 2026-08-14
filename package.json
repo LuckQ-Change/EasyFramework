@@ -7,7 +7,9 @@
   "unityRelease": "0f1",
   "documentationUrl": "https://github.com/LuckQ-Change/EasyFramework#readme",
   "changelogUrl": "https://github.com/LuckQ-Change/EasyFramework/blob/main/CHANGELOG.md",
-  "dependencies": {},
+  "dependencies": {
+    "com.unity.ugui": "1.0.0"
+  },
   "keywords": [
     "framework",
     "unity",
@@ -17,6 +19,8 @@
     "network",
     "event",
     "pool",
+    "ui",
+    "ugui",
     "easy"
   ],
   "author": {

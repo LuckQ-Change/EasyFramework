@@ -1,7 +1,8 @@
 {
   "name": "com.wjq.easyframework.tests",
   "references": [
-    "com.wjq.easyframework.runtime"
+    "com.wjq.easyframework.runtime",
+    "Unity.ugui"
   ],
   "includePlatforms": [
     "Editor"

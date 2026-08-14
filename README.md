@@ -29,6 +29,8 @@ private static void RegisterModules()
 
 完整 API 和生命周期说明见 [使用说明](doc/使用说明.md)，框架约束和测试要求见 [开发指南](doc/开发指南.md)。
 
+UI 使用通用 `EasyUIDisplay`、纯 C# View/Item、可再生 Binding、响应式数据流和 FGUI 风格状态；详见 [UI 框架使用说明](doc/UI框架使用说明.md)。
+
 ## 设计边界
 
 - 不使用反射扫描或大型 DI 容器注册模块。

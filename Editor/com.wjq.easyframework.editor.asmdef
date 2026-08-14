@@ -1,7 +1,9 @@
 {
   "name": "com.wjq.easyframework.editor",
   "references": [
-    "com.wjq.easyframework.runtime"
+    "com.wjq.easyframework.runtime",
+    "Unity.ugui",
+    "UnityEditor.UI"
   ],
   "includePlatforms": [
     "Editor"
