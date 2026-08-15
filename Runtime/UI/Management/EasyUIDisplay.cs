@@ -8,12 +8,12 @@ namespace EasyFramework.UI
     /// </summary>
     [AddComponentMenu("EasyFramework/UI/UI Display")]
     [DisallowMultipleComponent]
-    [RequireComponent(typeof(UIBindingContext))]
     [DefaultExecutionOrder(-200)]
     public sealed class EasyUIDisplay : MonoBehaviour
     {
-        [Header("Scripts")]
-        [SerializeField] private EasyUIScriptRecord _scripts = new EasyUIScriptRecord();
+        [Header("View Script")]
+        [SerializeField] private string _viewTypeName;
+        [SerializeField] private string _viewScriptPath;
         [SerializeField] private string _prefabLocation;
         [SerializeField] private bool _createOnAwake = true;
 
@@ -36,7 +36,8 @@ namespace EasyFramework.UI
         private bool _created;
         private bool _focused;
 
-        public EasyUIScriptRecord Scripts => _scripts;
+        public string ViewTypeName => _viewTypeName;
+        public string ViewScriptPath => _viewScriptPath;
         public string PrefabLocation => _prefabLocation;
         public bool ManagedAsView => _managedAsView;
         public string ViewId => _viewId;
@@ -55,7 +56,7 @@ namespace EasyFramework.UI
         public EasyUIManager Manager { get; private set; }
         public EasyUIObject Logic => EnsureCreated();
         public EasyUIView View => EnsureCreated() as EasyUIView;
-        public EasyUIBinding GeneratedBinding
+        public EasyUIBinding Binding
         {
             get
             {
@@ -82,13 +83,12 @@ namespace EasyFramework.UI
         public EasyUIObject EnsureCreated()
         {
             if (_logic != null) return _logic;
-            if (!EasyUIFactoryRegistry.TryCreate(_scripts, out _logic, out _binding))
+            if (!EasyUIFactory.TryCreate(_viewTypeName, out _logic, out _binding))
             {
-                if (!string.IsNullOrWhiteSpace(_scripts.LogicTypeName))
+                if (!string.IsNullOrWhiteSpace(_viewTypeName))
                     throw new InvalidOperationException(
-                        $"{name}: cannot create UI logic '{_scripts.LogicTypeName}'. " +
-                        "Regenerate the Display scripts and resolve compilation errors.");
-                _binding = new EmptyEasyUIBinding();
+                        $"{name}: cannot create UI View '{_viewTypeName}'. Resolve its compilation errors.");
+                _binding = new EasyUIBinding();
                 _logic = _managedAsView ? (EasyUIObject)new EasyUIView() : new EasyUIItem();
             }
 
@@ -96,7 +96,9 @@ namespace EasyFramework.UI
             {
                 _binding.Initialize(this);
                 _logic.Initialize(this, _binding);
-                if (BindingContext != null && BindingContext.Source == null)
+                // A managed View owns its binding source. By default that source is
+                // the View itself, while advanced Views may override BindingSource.
+                if (_managedAsView && BindingContext != null)
                     BindingContext.SetSource(_logic.BindingSource);
                 return _logic;
             }
@@ -110,19 +112,13 @@ namespace EasyFramework.UI
             }
         }
 
-        public void SetScriptRecord(
-            string recordId,
-            string logicTypeName,
-            string bindingTypeName,
-            string logicBaseTypeName,
-            string logicScriptPath,
-            string bindingScriptPath,
-            string displaySignature,
+        public void SetViewScript(
+            string viewTypeName,
+            string viewScriptPath,
             string prefabLocation)
         {
-            _scripts.Set(
-                recordId, logicTypeName, bindingTypeName, logicBaseTypeName,
-                logicScriptPath, bindingScriptPath, displaySignature);
+            _viewTypeName = viewTypeName;
+            _viewScriptPath = viewScriptPath;
             _prefabLocation = prefabLocation;
         }
 
@@ -170,7 +166,7 @@ namespace EasyFramework.UI
             Closed?.Invoke(this);
         }
 
-        private void OnDestroy()
+        internal void DisposeContent()
         {
             try { _logic?.Dispose(); }
             catch (Exception exception) { Log.Error($"[UI] {name}: logic dispose failed: {exception}"); }
@@ -180,10 +176,15 @@ namespace EasyFramework.UI
             {
                 _logic = null;
                 _binding = null;
-                EasyUIManager manager = Manager;
-                Manager = null;
-                manager?.NotifyViewDestroyed(this);
             }
+        }
+
+        private void OnDestroy()
+        {
+            DisposeContent();
+            EasyUIManager manager = Manager;
+            Manager = null;
+            manager?.NotifyViewDestroyed(this);
         }
     }
 }

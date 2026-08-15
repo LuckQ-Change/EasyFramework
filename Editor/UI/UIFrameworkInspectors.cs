@@ -20,7 +20,7 @@ namespace EasyFramework.Editor.UI
                 EditorUtility.SetDirty(context);
             }
             EditorGUILayout.HelpBox(
-                "命名规则：bind_Level 自动推断属性；bind_Level$Text 可显式指定 Text。响应绑定会随 EasyUIDisplay 一起生成到对应 XxxBinding.g.cs。",
+                "命名规则：bind_Level 自动推断属性；bind_Level$Text 可显式指定 Text。响应绑定保存在 Prefab 的 UIBindingContext 中，不生成脚本。",
                 MessageType.Info);
         }
 

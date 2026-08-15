@@ -1,8 +1,10 @@
 using EasyFramework.UI;
 using NUnit.Framework;
+using System.Collections;
 using System.Threading.Tasks;
 using UnityEditor;
 using UnityEngine;
+using UnityEngine.TestTools;
 using UnityEngine.UI;
 
 namespace EasyFramework.Tests
@@ -10,7 +12,16 @@ namespace EasyFramework.Tests
     public sealed class UIManagerTests
     {
         private sealed class TestView : EasyUIView { public TestView() { } }
-        private sealed class TestBinding : EasyUIBinding { public TestBinding() { } }
+        private sealed class StatefulView : EasyUIView<int>
+        {
+            public int OpenedWith { get; private set; }
+            public bool Closed { get; private set; }
+            public bool Disposed { get; private set; }
+
+            protected override void OnOpened(int args) => OpenedWith = args;
+            protected override void OnClosed() => Closed = true;
+            protected override void OnDispose() => Disposed = true;
+        }
         private class Item : EasyUIItem { public Item() { } }
         private sealed class CostItem : Item { public CostItem() { } }
 
@@ -34,16 +45,10 @@ namespace EasyFramework.Tests
         {
             var prefab = new GameObject(name, typeof(RectTransform), typeof(EasyUIDisplay));
             var display = prefab.GetComponent<EasyUIDisplay>();
-            display.SetScriptRecord(
-                recordId,
+            display.SetViewScript(
                 typeof(TestView).FullName,
-                typeof(TestBinding).FullName,
-                typeof(EasyUIView).FullName,
-                string.Empty,
-                string.Empty,
                 string.Empty,
                 "UI/" + name);
-            EasyUIFactoryRegistry.Register<TestView, TestBinding>(recordId, "UI/" + name);
             return display;
         }
 
@@ -61,7 +66,10 @@ namespace EasyFramework.Tests
                 EasyUIView second = manager.Open(prefab.gameObject, 2, UILayer.Popup);
 
                 Assert.AreSame(first, second);
-                Assert.AreEqual(1, manager.OpenCount);
+                Assert.AreEqual(
+                    1,
+                    manager.OpenCount,
+                    "Open displays: " + string.Join(", ", manager.OpenDisplays));
                 Assert.AreEqual(2, first.OpenArgs);
                 Assert.AreEqual(UILayer.Popup, first.Display.CurrentLayer);
                 Assert.AreSame(manager.GetLayerRoot(UILayer.Popup), first.Display.transform.parent);
@@ -104,8 +112,15 @@ namespace EasyFramework.Tests
             }
         }
 
-        [Test]
-        public async Task PreloadAndOpenAsync_ShareAssetModuleLoad_AndReleaseBothLeases()
+        [UnityTest]
+        public IEnumerator PreloadAndOpenAsync_ShareAssetModuleLoad_AndReleaseBothLeases()
+        {
+            Task task = PreloadAndOpenCore();
+            while (!task.IsCompleted) yield return null;
+            if (task.IsFaulted) throw task.Exception.InnerException;
+        }
+
+        private static async Task PreloadAndOpenCore()
         {
             var modules = new ModuleManager();
             var managerObject = new GameObject("UI Manager", typeof(RectTransform), typeof(EasyUIRuntimeHost));
@@ -148,10 +163,7 @@ namespace EasyFramework.Tests
                 var serialized = new SerializedObject(display);
                 serialized.FindProperty("_managedAsView").boolValue = false;
                 serialized.ApplyModifiedPropertiesWithoutUndo();
-                display.SetScriptRecord(
-                    "cost-item-test", typeof(CostItem).FullName, typeof(TestBinding).FullName,
-                    typeof(Item).FullName, string.Empty, string.Empty, string.Empty, string.Empty);
-                EasyUIFactoryRegistry.Register<CostItem, TestBinding>("cost-item-test", string.Empty);
+                display.SetViewScript(typeof(CostItem).FullName, string.Empty, string.Empty);
 
                 CostItem item = display.GetLogic<CostItem>();
                 Assert.NotNull(item);
@@ -162,6 +174,66 @@ namespace EasyFramework.Tests
             finally
             {
                 Object.DestroyImmediate(itemObject);
+            }
+        }
+
+        [Test]
+        public void TypedView_IsBindingSource_AndOwnsItsLifecycle()
+        {
+            var prefab = new GameObject("Stateful View", typeof(RectTransform), typeof(EasyUIDisplay));
+            var managerObject = new GameObject("UI Manager", typeof(RectTransform), typeof(EasyUIRuntimeHost));
+            StatefulView view = null;
+            try
+            {
+                var display = prefab.GetComponent<EasyUIDisplay>();
+                display.SetViewScript(typeof(StatefulView).FullName, string.Empty, string.Empty);
+
+                view = managerObject.GetComponent<EasyUIRuntimeHost>().Manager
+                    .Open<StatefulView>(prefab, 42);
+
+                Assert.AreSame(view, view.BindingSource);
+                Assert.AreEqual(42, view.OpenedWith);
+                Assert.IsTrue(view.Manager.Close(view));
+                Assert.IsTrue(view.Closed);
+                Assert.IsTrue(view.Disposed);
+            }
+            finally
+            {
+                if (prefab != null) Object.DestroyImmediate(prefab);
+                if (managerObject != null) Object.DestroyImmediate(managerObject);
+            }
+        }
+
+        [Test]
+        public void Binding_Get_UsesPrefabSerializedReference()
+        {
+            var prefab = new GameObject("Reference View", typeof(RectTransform), typeof(EasyUIDisplay));
+            var buttonObject = new GameObject("Close", typeof(RectTransform), typeof(Button));
+            buttonObject.transform.SetParent(prefab.transform, false);
+            var marker = prefab.AddComponent<EasyUIReference>();
+            var serializedMarker = new SerializedObject(marker);
+            SerializedProperty entries = serializedMarker.FindProperty("_entries");
+            entries.arraySize = 1;
+            SerializedProperty entry = entries.GetArrayElementAtIndex(0);
+            entry.FindPropertyRelative("_key").stringValue = "CloseButton";
+            entry.FindPropertyRelative("_target").objectReferenceValue = buttonObject.GetComponent<Button>();
+            serializedMarker.ApplyModifiedPropertiesWithoutUndo();
+
+            var managerObject = new GameObject("UI Manager", typeof(RectTransform), typeof(EasyUIRuntimeHost));
+            try
+            {
+                EasyUIDisplay display = prefab.GetComponent<EasyUIDisplay>();
+                display.SetViewScript(typeof(TestView).FullName, string.Empty, string.Empty);
+                TestView view = managerObject.GetComponent<EasyUIRuntimeHost>().Manager.Open<TestView>(prefab);
+
+                Button resolved = view.Binding.Get<Button>("CloseButton");
+                Assert.NotNull(resolved);
+                Assert.AreSame(view.Display.transform.Find("Close").GetComponent<Button>(), resolved);
+            }
+            finally
+            {
+                Object.DestroyImmediate(prefab);
+                if (managerObject != null) Object.DestroyImmediate(managerObject);
             }
         }
 

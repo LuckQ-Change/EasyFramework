@@ -13,7 +13,7 @@ namespace EasyFramework.Editor.UI
             if (context == null) return null;
             if (context.Source != null) return context.Source.GetType();
             EasyUIDisplay display = context.GetComponentInParent<EasyUIDisplay>();
-            string typeName = display == null ? null : display.Scripts.LogicTypeName;
+            string typeName = display == null ? null : display.ViewTypeName;
             if (string.IsNullOrWhiteSpace(typeName)) return null;
             foreach (Assembly assembly in AppDomain.CurrentDomain.GetAssemblies())
             {

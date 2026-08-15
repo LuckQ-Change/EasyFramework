@@ -12,7 +12,6 @@ namespace EasyFramework.UI
     public sealed class UIBindingContext : MonoBehaviour
     {
         [SerializeField] private UnityEngine.Object _source;
-        [SerializeField] private string _generatedBindingId;
         [SerializeField] private List<UIBindingDefinition> _bindings = new List<UIBindingDefinition>();
         [SerializeField] private bool _warnOnMissingBinding = true;
 
@@ -20,7 +19,6 @@ namespace EasyFramework.UI
         private CompositeDisposable _scope;
 
         public object Source => _runtimeSource ?? _source;
-        public string GeneratedBindingId => _generatedBindingId;
         public IReadOnlyList<UIBindingDefinition> Bindings => _bindings;
 
         private void OnEnable() => Bind();
@@ -43,7 +41,6 @@ namespace EasyFramework.UI
                 return;
             }
 
-            if (GeneratedUIBindingRegistry.TryInstall(_generatedBindingId, this)) return;
             for (int i = 0; i < _bindings.Count; i++)
             {
                 var binding = _bindings[i];
@@ -61,31 +58,6 @@ namespace EasyFramework.UI
         {
             _scope?.Dispose();
             _scope = null;
-        }
-
-        public void RegisterGenerated(
-            string relativePath,
-            Type componentType,
-            UIBindingProperty targetProperty,
-            string sourceKey,
-            string format,
-            bool twoWay)
-        {
-            if (componentType == null || !typeof(Component).IsAssignableFrom(componentType))
-            {
-                Warn($"Generated target type is invalid for '{sourceKey}'.");
-                return;
-            }
-
-            Transform targetTransform = string.IsNullOrEmpty(relativePath) ? transform : transform.Find(relativePath);
-            if (targetTransform == null)
-            {
-                Warn($"Generated path '{relativePath}' was not found for '{sourceKey}'. Regenerate bindings.");
-                return;
-            }
-
-            var target = targetTransform.GetComponent(componentType);
-            RegisterBinding(target, targetProperty, sourceKey, format, twoWay);
         }
 
         public void RegisterBinding(
@@ -138,8 +110,6 @@ namespace EasyFramework.UI
             if (bindings != null) _bindings.AddRange(bindings);
             if (isActiveAndEnabled) Bind();
         }
-
-        public void SetGeneratedBindingId(string bindingId) => _generatedBindingId = bindingId;
 
         private static void ApplyValue(Component target, UIBindingProperty property, object value, string format)
         {

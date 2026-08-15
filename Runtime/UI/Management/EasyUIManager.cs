@@ -41,9 +41,23 @@ namespace EasyFramework.UI
         }
 
         public EasyUIRuntimeHost RuntimeHost => _host;
-        public int OpenCount => _openOrder.Count;
+        public int OpenCount
+        {
+            get
+            {
+                PruneDestroyedDisplays();
+                return _openOrder.Count;
+            }
+        }
         public int PreloadedCount => _preloaded.Count;
-        public IReadOnlyList<EasyUIDisplay> OpenDisplays => _openOrder;
+        public IReadOnlyList<EasyUIDisplay> OpenDisplays
+        {
+            get
+            {
+                PruneDestroyedDisplays();
+                return _openOrder;
+            }
+        }
         public EasyUIDisplay TopDisplay => FindTopVisible();
         public EasyUIView TopView => TopDisplay?.View;
 
@@ -205,7 +219,7 @@ namespace EasyFramework.UI
         public async Task<TView> OpenGeneratedAsync<TView>(object args = null, UILayer? layer = null)
             where TView : EasyUIView
         {
-            if (!EasyUIFactoryRegistry.TryGetPrefabLocation<TView>(out string location))
+            if (!EasyUIFactory.TryGetPrefabLocation<TView>(out string location))
                 throw new InvalidOperationException(
                     $"No generated prefab location is registered for {typeof(TView).FullName}. Regenerate its binding script.");
             return await OpenAsync<TView>(location, args, layer);
@@ -225,6 +239,7 @@ namespace EasyFramework.UI
             {
                 display.gameObject.SetActive(false);
                 ReleaseDisplayLease(display);
+                display.DisposeContent();
                 DestroyUnityObject(display.gameObject);
             }
 
@@ -351,7 +366,9 @@ namespace EasyFramework.UI
 
         internal void NotifyViewDestroyed(EasyUIDisplay display)
         {
-            if (_shuttingDown || display == null) return;
+            // Unity objects compare equal to null while their OnDestroy callback is
+            // running. ReferenceEquals is required so the dead entry is still removed.
+            if (_shuttingDown || ReferenceEquals(display, null)) return;
             _openOrder.Remove(display);
             RemoveSingleton(display);
             ReleaseDisplayLease(display);
@@ -359,21 +376,26 @@ namespace EasyFramework.UI
             RefreshBackground();
         }
 
-        internal void NotifyHostDestroyed(EasyUIRuntimeHost host)
+        internal static void ReleaseHost(EasyUIRuntimeHost host)
         {
-            if (_host != host) return;
-            ShutdownInternal();
-            _host = null;
+            EasyUIManager manager = _instance;
+            if (manager == null || !ReferenceEquals(manager._host, host)) return;
+            manager.ShutdownInternal();
+            manager._host = null;
             _instance = null;
         }
 
         internal void RefreshCanvasSettings(EasyUIRuntimeHost host)
         {
-            if (_host == host && !_shuttingDown) EnsureRootCanvas();
+            if (_host != host || _shuttingDown) return;
+            EnsureRootCanvas();
+            foreach (RectTransform root in _layerRoots.Values)
+                if (root != null) root.gameObject.layer = _host.UILayer;
         }
 
         private EasyUIDisplay OpenPrefab(GameObject prefab, object args, UILayer? layer, out bool created)
         {
+            PruneDestroyedDisplays();
             EasyUIDisplay prefabDisplay = prefab.GetComponent<EasyUIDisplay>();
             if (prefabDisplay == null)
                 throw new InvalidOperationException($"UI prefab '{prefab.name}' must contain EasyUIDisplay on its root.");
@@ -441,14 +463,14 @@ namespace EasyFramework.UI
         {
             string removeKey = null;
             foreach (var pair in _singletons)
-                if (pair.Value == display) { removeKey = pair.Key; break; }
+                if (ReferenceEquals(pair.Value, display)) { removeKey = pair.Key; break; }
             if (removeKey != null) _singletons.Remove(removeKey);
         }
 
         private static string ResolveKey(EasyUIDisplay display, string fallbackName)
         {
             if (display != null && !string.IsNullOrWhiteSpace(display.ViewId)) return display.ViewId;
-            string logicType = display?.Scripts?.LogicTypeName;
+            string logicType = display?.ViewTypeName;
             return $"{logicType ?? typeof(EasyUIView).FullName}:{fallbackName}";
         }
 
@@ -524,6 +546,28 @@ namespace EasyFramework.UI
             else lease.Dispose();
         }
 
+        private void PruneDestroyedDisplays()
+        {
+            for (int i = _openOrder.Count - 1; i >= 0; i--)
+            {
+                EasyUIDisplay display = _openOrder[i];
+                if (display != null) continue;
+                _openOrder.RemoveAt(i);
+                ReleaseDisplayLease(display);
+            }
+
+            List<string> deadSingletons = null;
+            foreach (var pair in _singletons)
+            {
+                if (pair.Value != null) continue;
+                if (deadSingletons == null) deadSingletons = new List<string>();
+                deadSingletons.Add(pair.Key);
+            }
+            if (deadSingletons == null) return;
+            for (int i = 0; i < deadSingletons.Count; i++)
+                _singletons.Remove(deadSingletons[i]);
+        }
+
         private static void ApplyLayout(EasyUIDisplay display)
         {
             if (display.StretchToLayer && display.transform is RectTransform rect) Stretch(rect);
@@ -550,7 +594,15 @@ namespace EasyFramework.UI
             if (_host != null || _shuttingDown || _quitting) return;
             var existing = Object.FindObjectOfType<EasyUIRuntimeHost>(true);
             if (existing != null) { AttachHost(existing); return; }
-            var hostObject = new GameObject("[EasyUI]", typeof(RectTransform));
+            // Create the required Canvas stack before EasyUIRuntimeHost.Awake attaches
+            // the manager. This avoids AddComponent/OnValidate re-entry while the host
+            // is building its first layer roots in EditMode and at startup.
+            var hostObject = new GameObject(
+                "[EasyUI]",
+                typeof(RectTransform),
+                typeof(Canvas),
+                typeof(CanvasScaler),
+                typeof(GraphicRaycaster));
             var host = hostObject.AddComponent<EasyUIRuntimeHost>();
             if (_host == null) AttachHost(host);
         }
@@ -592,7 +644,12 @@ namespace EasyFramework.UI
             if (_host == null) return;
             GameObject root = _host.gameObject;
             var canvas = root.GetComponent<Canvas>() ?? root.AddComponent<Canvas>();
-            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+            canvas.renderMode = _host.RenderMode == EasyUIRenderMode.ScreenSpaceCamera
+                ? RenderMode.ScreenSpaceCamera
+                : RenderMode.ScreenSpaceOverlay;
+            canvas.worldCamera = _host.ResolveUICamera();
+            canvas.planeDistance = _host.PlaneDistance;
+            root.layer = _host.UILayer;
             var scaler = root.GetComponent<CanvasScaler>() ?? root.AddComponent<CanvasScaler>();
             scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
             scaler.referenceResolution = _host.ReferenceResolution;
@@ -611,6 +668,7 @@ namespace EasyFramework.UI
                 ? new GameObject(layerName, typeof(RectTransform), typeof(Canvas), typeof(GraphicRaycaster))
                 : found.gameObject;
             if (found == null) layerObject.transform.SetParent(_host.transform, false);
+            layerObject.layer = _host.UILayer;
             var rect = (RectTransform)layerObject.transform;
             Stretch(rect);
             var canvas = layerObject.GetComponent<Canvas>() ?? layerObject.AddComponent<Canvas>();

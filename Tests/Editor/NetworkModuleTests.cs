@@ -1,15 +1,24 @@
 using System;
+using System.Collections;
 using System.Net;
 using System.Net.Sockets;
 using System.Threading.Tasks;
 using NUnit.Framework;
+using UnityEngine.TestTools;
 
 namespace EasyFramework.Tests
 {
     public class NetworkModuleTests
     {
-        [Test]
-        public async Task Loopback_SendAndReceive_UsesFramingAndMainThreadDispatch()
+        [UnityTest]
+        public IEnumerator Loopback_SendAndReceive_UsesFramingAndMainThreadDispatch()
+        {
+            Task task = LoopbackCore();
+            while (!task.IsCompleted) yield return null;
+            if (task.IsFaulted) throw task.Exception.InnerException;
+        }
+
+        private static async Task LoopbackCore()
         {
             var listener = new TcpListener(IPAddress.Loopback, 0);
             var manager = new ModuleManager();

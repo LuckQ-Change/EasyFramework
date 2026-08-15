@@ -1,5 +1,7 @@
+using System.Collections;
 using System.Threading.Tasks;
 using NUnit.Framework;
+using UnityEngine.TestTools;
 
 namespace EasyFramework.Tests
 {
@@ -26,8 +28,15 @@ namespace EasyFramework.Tests
             public void ReleaseAll() { }
         }
 
-        [Test]
-        public async Task ConcurrentAcquire_SharesLoad_AndReleasesAfterLastLease()
+        [UnityTest]
+        public IEnumerator ConcurrentAcquire_SharesLoad_AndReleasesAfterLastLease()
+        {
+            Task task = ConcurrentAcquireCore();
+            while (!task.IsCompleted) yield return null;
+            if (task.IsFaulted) throw task.Exception.InnerException;
+        }
+
+        private static async Task ConcurrentAcquireCore()
         {
             var manager = new ModuleManager();
             manager.Register<AssetModule>();
