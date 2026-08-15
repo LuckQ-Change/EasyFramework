@@ -5,18 +5,45 @@ using UnityEngine;
 
 namespace EasyFramework.UI
 {
-    /// <summary>Pure C# generated-reference binding. It is never attached to a prefab.</summary>
-    public abstract class EasyUIBinding : IDisposable
+    /// <summary>Runtime access to references serialized on EasyUIReference markers.</summary>
+    public class EasyUIBinding : IDisposable
     {
         public EasyUIDisplay Display { get; private set; }
         public Transform Root => Display == null ? null : Display.transform;
         public UIBindingContext Context => Display == null ? null : Display.BindingContext;
         private readonly List<IDisposable> _resourceLeases = new List<IDisposable>();
+        private readonly Dictionary<string, EasyUIReferenceEntry> _references =
+            new Dictionary<string, EasyUIReferenceEntry>(StringComparer.Ordinal);
 
         internal void Initialize(EasyUIDisplay display)
         {
             Display = display ?? throw new ArgumentNullException(nameof(display));
+            CollectReferences();
             OnBind();
+        }
+
+        public T Get<T>(string key) where T : Component
+        {
+            if (!_references.TryGetValue(key ?? string.Empty, out EasyUIReferenceEntry entry))
+                throw new KeyNotFoundException($"UI reference '{key}' was not found on {Display?.name}.");
+            if (entry.Target is T typed) return typed;
+            throw new InvalidCastException(
+                $"UI reference '{key}' is {entry.Target?.GetType().Name ?? "null"}, expected {typeof(T).Name}.");
+        }
+
+        public bool TryGet<T>(string key, out T value) where T : Component
+        {
+            value = null;
+            if (!_references.TryGetValue(key ?? string.Empty, out EasyUIReferenceEntry entry)) return false;
+            value = entry.Target as T;
+            return value != null;
+        }
+
+        public string GetResourceLocation(string key)
+        {
+            return _references.TryGetValue(key ?? string.Empty, out EasyUIReferenceEntry entry)
+                ? entry.ResourceLocation
+                : null;
         }
 
         public T Find<T>(string relativePath) where T : Component
@@ -51,10 +78,24 @@ namespace EasyFramework.UI
             {
                 foreach (IDisposable lease in _resourceLeases) lease?.Dispose();
                 _resourceLeases.Clear();
+                _references.Clear();
                 Display = null;
             }
         }
-    }
 
-    public sealed class EmptyEasyUIBinding : EasyUIBinding { }
+        private void CollectReferences()
+        {
+            foreach (EasyUIReference marker in Display.GetComponentsInChildren<EasyUIReference>(true))
+            {
+                foreach (EasyUIReferenceEntry entry in marker.Entries)
+                {
+                    if (entry == null || entry.Target == null || string.IsNullOrWhiteSpace(entry.Key)) continue;
+                    string key = entry.Key.Trim();
+                    if (_references.ContainsKey(key))
+                        throw new InvalidOperationException($"Duplicate UI reference key '{key}' on {Display.name}.");
+                    _references.Add(key, entry);
+                }
+            }
+        }
+    }
 }

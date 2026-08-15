@@ -15,9 +15,19 @@ namespace EasyFramework.UI
             OnOpened(args);
         }
 
-        internal void Focus() => OnFocused();
-        internal void Blur() => OnBlurred();
-        internal void CloseInternal() => OnClosed();
+        internal void Focus()
+        {
+            OnFocused();
+        }
+
+        internal void Blur()
+        {
+            OnBlurred();
+        }
+        internal void CloseInternal()
+        {
+            OnClosed();
+        }
 
         protected virtual void OnOpened(object args) { }
         protected virtual void OnFocused() { }
@@ -25,11 +35,9 @@ namespace EasyFramework.UI
         protected virtual void OnClosed() { }
     }
 
-    /// <summary>Strongly typed business base used by generated View scripts.</summary>
-    public abstract class EasyUIView<TBinding, TArgs> : EasyUIView
-        where TBinding : EasyUIBinding
+    /// <summary>Strongly typed View base. The View itself is the default binding source.</summary>
+    public abstract class EasyUIView<TArgs> : EasyUIView
     {
-        public new TBinding Binding => (TBinding)base.Binding;
         public TArgs Args { get; private set; }
 
         protected sealed override void OnOpened(object args)

@@ -7,16 +7,16 @@ namespace EasyFramework.UI
     [Serializable]
     public sealed class EasyUIReferenceEntry
     {
-        [SerializeField] private string _propertyName;
+        [SerializeField] private string _key;
         [SerializeField] private Component _target;
         [SerializeField] private string _resourceLocation;
 
-        public string PropertyName => _propertyName;
+        public string Key => _key;
         public Component Target => _target;
         public string ResourceLocation => _resourceLocation;
     }
 
-    /// <summary>FGUI-style marker used to generate strongly typed properties and resource locations.</summary>
+    /// <summary>Serialized component references exposed through EasyUIBinding.Get.</summary>
     [AddComponentMenu("EasyFramework/UI/Reference Marker")]
     [DisallowMultipleComponent]
     public sealed class EasyUIReference : MonoBehaviour

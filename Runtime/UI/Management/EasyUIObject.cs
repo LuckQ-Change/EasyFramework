@@ -10,7 +10,7 @@ namespace EasyFramework.UI
         public EasyUIManager Manager => Display == null ? null : Display.Manager;
         public bool IsDisposed { get; private set; }
 
-        /// <summary>Override when bindings should read a separate ViewModel.</summary>
+        /// <summary>Override when bindings should read a separate presentation source.</summary>
         public virtual object BindingSource => this;
 
         internal void Initialize(EasyUIDisplay display, EasyUIBinding binding)
@@ -30,10 +30,18 @@ namespace EasyFramework.UI
             try { OnDispose(); }
             finally
             {
-                Binding = null;
-                Display = null;
+                try { ReleaseOwnedResources(); }
+                finally
+                {
+                    Binding = null;
+                    Display = null;
+                }
             }
         }
+
+        // Kept inside the runtime assembly so framework-owned resources cannot be
+        // accidentally skipped by a user override of OnDispose.
+        private protected virtual void ReleaseOwnedResources() { }
     }
 
     /// <summary>Reusable pure C# item base. Derive Item, CostItem and other item families from it.</summary>

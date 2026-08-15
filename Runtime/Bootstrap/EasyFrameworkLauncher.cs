@@ -1,4 +1,3 @@
-#if UNITY_5_3_OR_NEWER
 using UnityEngine;
 
 namespace EasyFramework
@@ -9,7 +8,12 @@ namespace EasyFramework
     {
         private static EasyFrameworkLauncher _instance;
 
+        [SerializeField] private EasyFrameworkStartupPreset _startupPreset;
+        private EasyFrameworkStartupPreset _activePreset;
+
         public static EasyFrameworkLauncher Instance => _instance;
+        public EasyFrameworkStartupPreset StartupPreset => _startupPreset;
+        public EasyFrameworkStartupPreset ActivePreset => _activePreset;
 
         private void Awake()
         {
@@ -22,7 +26,22 @@ namespace EasyFramework
             DontDestroyOnLoad(gameObject);
 
             RedirectLogToUnity();
-            EasyEntry.Init(ModuleRegistry.ApplyAll);
+            try
+            {
+                _activePreset = EasyFrameworkStartupPreset.Resolve(_startupPreset);
+                EasyRuntime.Configure(_activePreset.RuntimeMode);
+                EasyEntry.Init(ModuleRegistry.ApplyAll);
+                if (_activePreset.StartProcedureFlow)
+                    _ = StartFlowSafelyAsync(_activePreset);
+                else
+                    _activePreset.Apply();
+            }
+            catch
+            {
+                EasyEntry.Shutdown();
+                _instance = null;
+                throw;
+            }
         }
 
         private void Update()
@@ -33,6 +52,7 @@ namespace EasyFramework
         private void OnApplicationQuit()
         {
             EasyEntry.Shutdown();
+            _activePreset = null;
             _instance = null;
         }
 
@@ -41,6 +61,7 @@ namespace EasyFramework
             if (_instance == this)
             {
                 EasyEntry.Shutdown();
+                _activePreset = null;
                 _instance = null;
             }
         }
@@ -57,6 +78,16 @@ namespace EasyFramework
                 }
             };
         }
+
+        private static async System.Threading.Tasks.Task StartFlowSafelyAsync(
+            EasyFrameworkStartupPreset preset)
+        {
+            try { await preset.StartFlowAsync(); }
+            catch (System.OperationCanceledException) { }
+            catch (System.Exception exception)
+            {
+                Log.Error($"[Startup] procedure flow failed: {exception}");
+            }
+        }
     }
 }
-#endif

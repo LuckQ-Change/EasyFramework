@@ -13,15 +13,15 @@ namespace EasyFramework.Editor.UI
             var marker = (EasyUIReference)target;
             foreach (EasyUIReferenceEntry entry in marker.Entries)
             {
-                if (entry == null || entry.Target == null || string.IsNullOrWhiteSpace(entry.PropertyName))
+                if (entry == null || entry.Target == null || string.IsNullOrWhiteSpace(entry.Key))
                 {
                     EditorGUILayout.HelpBox(
-                        "每条标记都需要 Property Name 和 Target。Resource Location 可选；填写后会生成 EasyUIResource 特性与常量。",
+                        "每条引用只需要 Key 和 Target；Resource Location 可选。",
                         MessageType.Error);
                     break;
                 }
             }
-            if (GUILayout.Button("Select Owning Display To Generate"))
+            if (GUILayout.Button("Select Owning Display"))
             {
                 EasyUIDisplay display = marker.GetComponentInParent<EasyUIDisplay>();
                 if (display == null)

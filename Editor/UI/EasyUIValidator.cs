@@ -30,28 +30,24 @@ namespace EasyFramework.Editor.UI
         {
             var problems = new List<string>();
             if (display == null) { problems.Add("缺少 EasyUIDisplay。"); return problems; }
-            if (display.GetComponent<UIBindingContext>() == null) problems.Add("缺少 UIBindingContext。");
-            if (string.IsNullOrWhiteSpace(display.Scripts.RecordId)) problems.Add("尚未生成 Display 脚本记录。");
+            if (string.IsNullOrWhiteSpace(display.ViewTypeName)) problems.Add("尚未生成 View 脚本。");
             if (display.ManagedAsView && string.IsNullOrWhiteSpace(display.PrefabLocation))
                 problems.Add("View 缺少 Prefab Location。");
-            if (!string.IsNullOrWhiteSpace(display.Scripts.LogicScriptPath) &&
-                !File.Exists(Path.GetFullPath(display.Scripts.LogicScriptPath)))
+            if (!string.IsNullOrWhiteSpace(display.ViewScriptPath) &&
+                !File.Exists(Path.GetFullPath(display.ViewScriptPath)))
                 problems.Add("记录的业务脚本不存在，请重新生成。");
-            if (!string.IsNullOrWhiteSpace(display.Scripts.BindingScriptPath) &&
-                !File.Exists(Path.GetFullPath(display.Scripts.BindingScriptPath)))
-                problems.Add("记录的 Binding 脚本不存在，请重新生成。");
-            if (!string.IsNullOrWhiteSpace(display.Scripts.DisplaySignature) &&
-                display.Scripts.DisplaySignature != EasyUIScriptGenerator.ComputeSignature(display))
-                problems.Add("Display 层级或绑定配置已改变，生成的 Binding 已过期。");
-
-            Type sourceType = UIBindingEditorReflection.ResolveSourceType(display.BindingContext);
-            foreach (UIBindingDefinition binding in display.BindingContext.Bindings)
+            UIBindingContext bindingContext = display.BindingContext;
+            Type sourceType = UIBindingEditorReflection.ResolveSourceType(bindingContext);
+            if (bindingContext != null)
             {
-                if (binding == null || binding.Target == null) problems.Add("存在空的响应绑定 Target。");
-                if (binding != null && string.IsNullOrWhiteSpace(binding.SourceKey)) problems.Add("存在空的响应绑定 Source。");
-                if (binding != null && sourceType != null &&
-                    !UIBindingEditorReflection.HasBindableMember(sourceType, binding.SourceKey))
-                    problems.Add($"业务数据源中不存在响应属性：{binding.SourceKey}。");
+                foreach (UIBindingDefinition binding in bindingContext.Bindings)
+                {
+                    if (binding == null || binding.Target == null) problems.Add("存在空的响应绑定 Target。");
+                    if (binding != null && string.IsNullOrWhiteSpace(binding.SourceKey)) problems.Add("存在空的响应绑定 Source。");
+                    if (binding != null && sourceType != null &&
+                        !UIBindingEditorReflection.HasBindableMember(sourceType, binding.SourceKey))
+                        problems.Add($"业务数据源中不存在响应属性：{binding.SourceKey}。");
+                }
             }
 
             var properties = new HashSet<string>(StringComparer.Ordinal);
@@ -60,10 +56,10 @@ namespace EasyFramework.Editor.UI
                 foreach (EasyUIReferenceEntry entry in marker.Entries)
                 {
                     if (entry == null || entry.Target == null) problems.Add($"{marker.name} 有空的 Reference Target。");
-                    if (entry != null && string.IsNullOrWhiteSpace(entry.PropertyName))
-                        problems.Add($"{marker.name} 有空的 Property Name。");
-                    else if (entry != null && !properties.Add(entry.PropertyName))
-                        problems.Add($"Reference Property 重名：{entry.PropertyName}。");
+                    if (entry != null && string.IsNullOrWhiteSpace(entry.Key))
+                        problems.Add($"{marker.name} 有空的 Reference Key。");
+                    else if (entry != null && !properties.Add(entry.Key))
+                        problems.Add($"Reference Key 重名：{entry.Key}。");
                 }
             }
 

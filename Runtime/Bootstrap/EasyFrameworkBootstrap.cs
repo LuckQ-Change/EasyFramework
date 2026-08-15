@@ -9,6 +9,8 @@ namespace EasyFramework
         private static void ResetState()
         {
             ModuleRegistry.ClearRegistrars();
+            EasyFrameworkStartupPreset.ResetRuntimeDefault();
+            EasyRuntime.Reset();
         }
 
 #if !EASY_NO_AUTO_BOOTSTRAP

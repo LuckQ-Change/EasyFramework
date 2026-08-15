@@ -11,85 +11,60 @@ namespace EasyFramework.Editor.UI
     {
         private string _className;
         private string _namespaceName = EasyUIScriptGenerator.DefaultNamespace;
-        private string _baseTypeName;
         private string _prefabLocation;
-        private string _logicFolder = EasyUIScriptGenerator.DefaultLogicFolder;
-        private string _bindingFolder = EasyUIScriptGenerator.DefaultBindingFolder;
+        private string _scriptFolder = EasyUIScriptGenerator.DefaultScriptFolder;
 
         private void OnEnable()
         {
             var display = (EasyUIDisplay)target;
-            _className = string.IsNullOrWhiteSpace(display.Scripts.LogicTypeName)
+            _className = string.IsNullOrWhiteSpace(display.ViewTypeName)
                 ? display.name.Replace(" ", string.Empty)
-                : display.Scripts.LogicTypeName.Substring(display.Scripts.LogicTypeName.LastIndexOf('.') + 1);
-            _baseTypeName = string.IsNullOrWhiteSpace(display.Scripts.LogicBaseTypeName)
-                ? (display.ManagedAsView ? "EasyUIView" : "EasyUIItem")
-                : display.Scripts.LogicBaseTypeName;
+                : display.ViewTypeName.Substring(display.ViewTypeName.LastIndexOf('.') + 1);
+            _namespaceName = string.IsNullOrWhiteSpace(display.ViewTypeName) ||
+                             !display.ViewTypeName.Contains(".")
+                ? EasyUIScriptGenerator.DefaultNamespace
+                : display.ViewTypeName.Substring(0, display.ViewTypeName.LastIndexOf('.'));
             _prefabLocation = display.PrefabLocation;
-            if (!string.IsNullOrWhiteSpace(display.Scripts.LogicScriptPath))
-                _logicFolder = Path.GetDirectoryName(display.Scripts.LogicScriptPath)?.Replace('\\', '/');
-            if (!string.IsNullOrWhiteSpace(display.Scripts.BindingScriptPath))
-                _bindingFolder = Path.GetDirectoryName(display.Scripts.BindingScriptPath)?.Replace('\\', '/');
+            if (!string.IsNullOrWhiteSpace(display.ViewScriptPath))
+                _scriptFolder = Path.GetDirectoryName(display.ViewScriptPath)?.Replace('\\', '/');
         }
 
         public override void OnInspectorGUI()
         {
             serializedObject.Update();
-            DrawPropertiesExcluding(serializedObject, "m_Script", "_scripts", "_prefabLocation");
+            DrawPropertiesExcluding(serializedObject, "m_Script", "_viewTypeName", "_viewScriptPath", "_prefabLocation");
             serializedObject.ApplyModifiedProperties();
 
             var display = (EasyUIDisplay)target;
             EditorGUILayout.Space();
-            EditorGUILayout.LabelField("Pure C# Scripts", EditorStyles.boldLabel);
-            _className = EditorGUILayout.TextField("Class Name", _className);
+            EditorGUILayout.LabelField("View Script", EditorStyles.boldLabel);
+            _className = EditorGUILayout.TextField("Class", _className);
             _namespaceName = EditorGUILayout.TextField("Namespace", _namespaceName);
-            _baseTypeName = DrawBaseType(_baseTypeName, display.ManagedAsView);
-            _prefabLocation = EditorGUILayout.TextField("Prefab Location", _prefabLocation);
-            _logicFolder = EditorGUILayout.TextField("Business Path", _logicFolder);
-            _bindingFolder = EditorGUILayout.TextField("Binding Path", _bindingFolder);
+            _prefabLocation = EditorGUILayout.TextField("Resource Location", _prefabLocation);
+            _scriptFolder = EditorGUILayout.TextField("Script Path", _scriptFolder);
 
-            if (!string.IsNullOrWhiteSpace(display.Scripts.RecordId))
-            {
-                EditorGUILayout.LabelField("Record ID", display.Scripts.RecordId);
-                EditorGUILayout.LabelField("Business Script", display.Scripts.LogicScriptPath);
-                EditorGUILayout.LabelField("Generated Binding", display.Scripts.BindingScriptPath);
-                EditorGUILayout.LabelField("Display Signature", display.Scripts.DisplaySignature);
-            }
+            if (!string.IsNullOrWhiteSpace(display.ViewScriptPath))
+                EditorGUILayout.LabelField("Current Script", display.ViewScriptPath);
 
-            if (GUILayout.Button("生成 / 更新 Display 脚本"))
+            if (GUILayout.Button("Generate View Script"))
             {
                 try
                 {
                     string path = EasyUIScriptGenerator.Generate(
-                        display, _className, _namespaceName, _baseTypeName,
-                        _prefabLocation, _logicFolder, _bindingFolder);
-                    Debug.Log($"[Easy UI] Display 脚本已生成：{path}", display);
+                        display,
+                        _className,
+                        _namespaceName,
+                        _prefabLocation,
+                        _scriptFolder);
+                    Debug.Log($"[Easy UI] View generated: {path}", display);
                 }
-                catch (Exception exception)
-                {
-                    Debug.LogException(exception, display);
-                    EditorUtility.DisplayDialog("Easy UI", exception.Message, "确定");
-                }
+                catch (Exception exception) { Debug.LogException(exception, display); }
             }
 
-            if (GUILayout.Button("校验 Display"))
-                EasyUIValidator.ValidateAndReport(display);
-
+            if (GUILayout.Button("Validate Display")) EasyUIValidator.ValidateAndReport(display);
             EditorGUILayout.HelpBox(
-                "Prefab 只挂 EasyUIDisplay。业务脚本位于 Business Path，可继承；Binding 位于 Generated Path，只读。Reference Marker 上的 Resource Location 会作为特性和常量一起生成。",
+                "Only one View script is generated. Add EasyUIReference entries on the prefab and use Binding.Get<T>(key) in the View.",
                 MessageType.Info);
-        }
-
-        private static string DrawBaseType(string current, bool managedAsView)
-        {
-            if (managedAsView && current == "EasyUIItem") current = "EasyUIView";
-            if (!managedAsView && current == "EasyUIView") current = "EasyUIItem";
-            string[] options = EasyUIEditorTypeUtility.GetBusinessBaseTypes(managedAsView);
-            int selected = Array.IndexOf(options, current);
-            int next = EditorGUILayout.Popup("Business Base", Mathf.Max(0, selected), options);
-            if (next >= 0 && next < options.Length && (selected >= 0 || string.IsNullOrWhiteSpace(current)))
-                current = options[next];
-            return EditorGUILayout.TextField("Custom Base", current);
         }
     }
 }

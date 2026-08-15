@@ -20,6 +20,10 @@ namespace EasyFramework
         private int _generation;
 
         public bool IsReady { get; private set; }
+        public bool HasLoader
+        {
+            get { lock (_sync) return _loader != null; }
+        }
 
         public void SetLoader(IAssetLoader loader)
         {
