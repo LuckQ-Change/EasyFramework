@@ -1,6 +1,6 @@
 namespace EasyFramework.UI
 {
-    /// <summary>Pure C# view business base. Never attach a derived type to a prefab.</summary>
+    /// <summary>纯 C# View 业务基类，派生类型不能挂载到 Prefab。</summary>
     public class EasyUIView : EasyUIObject
     {
         public object OpenArgs { get; private set; }
@@ -35,7 +35,7 @@ namespace EasyFramework.UI
         protected virtual void OnClosed() { }
     }
 
-    /// <summary>Strongly typed View base. The View itself is the default binding source.</summary>
+    /// <summary>强类型 View 基类，默认以 View 自身作为绑定源。</summary>
     public abstract class EasyUIView<TArgs> : EasyUIView
     {
         public TArgs Args { get; private set; }

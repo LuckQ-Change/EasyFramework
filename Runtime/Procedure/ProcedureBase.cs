@@ -35,6 +35,16 @@ namespace EasyFramework
         protected virtual Task OnExitAsync(CancellationToken cancellationToken) => Task.CompletedTask;
         protected virtual void OnUpdate(float deltaTime) { }
 
+        /// <summary>获取项目自定义上下文；类型不匹配时直接报告清晰错误。</summary>
+        protected TContext RequireContext<TContext>() where TContext : ProcedureContext
+        {
+            if (Context is TContext context) return context;
+            string actual = Context == null ? "null" : Context.GetType().FullName;
+            throw new InvalidOperationException(
+                $"流程“{GetType().FullName}”需要上下文“{typeof(TContext).FullName}”，" +
+                $"当前上下文为“{actual}”。");
+        }
+
         protected static Task<Type> Next<TProcedure>() where TProcedure : ProcedureBase =>
             Task.FromResult(typeof(TProcedure));
 

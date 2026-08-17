@@ -211,7 +211,7 @@ namespace EasyFramework
         private async Task SendAndForgetAsync(int msgId, byte[] payload)
         {
             try { await SendAsync(msgId, payload).ConfigureAwait(false); }
-            catch (Exception ex) { Log.Error($"[Network] send failed: {ex}"); }
+            catch (Exception ex) { Log.Error("[Network] send failed.", ex); }
         }
 
         public void Disconnect()

@@ -112,6 +112,57 @@ namespace EasyFramework.Tests
             }
         }
 
+        [Test]
+        public void Open_AppliesConfiguredUnityLayerRecursively()
+        {
+            var managerObject = new GameObject("UI Manager", typeof(RectTransform), typeof(EasyUIRuntimeHost));
+            EasyUIDisplay prefab = CreateDisplayPrefab("Layered", "layered-test");
+            var child = new GameObject("Child", typeof(RectTransform));
+            child.transform.SetParent(prefab.transform, false);
+            prefab.gameObject.layer = 0;
+            child.layer = 0;
+
+            try
+            {
+                EasyUIManager manager = managerObject.GetComponent<EasyUIRuntimeHost>().Manager;
+                EasyUIView view = manager.Open(prefab.gameObject);
+                int expectedLayer = manager.RuntimeHost.UILayer;
+
+                Assert.AreEqual(expectedLayer, view.Display.gameObject.layer);
+                Assert.AreEqual(expectedLayer, view.Display.transform.GetChild(0).gameObject.layer);
+            }
+            finally
+            {
+                Object.DestroyImmediate(prefab.gameObject);
+                if (managerObject != null) Object.DestroyImmediate(managerObject);
+            }
+        }
+
+        [Test]
+        public void Open_RemovesConflictingCanvasComponentsFromManagedViewRoot()
+        {
+            var managerObject = new GameObject("UI Manager", typeof(RectTransform), typeof(EasyUIRuntimeHost));
+            EasyUIDisplay prefab = CreateDisplayPrefab("Canvas View", "canvas-view-test");
+            prefab.gameObject.AddComponent<Canvas>();
+            prefab.gameObject.AddComponent<CanvasScaler>();
+            prefab.gameObject.AddComponent<GraphicRaycaster>();
+
+            try
+            {
+                EasyUIManager manager = managerObject.GetComponent<EasyUIRuntimeHost>().Manager;
+                EasyUIView view = manager.Open(prefab.gameObject);
+
+                Assert.IsNull(view.Display.GetComponent<Canvas>());
+                Assert.IsNull(view.Display.GetComponent<CanvasScaler>());
+                Assert.IsNull(view.Display.GetComponent<GraphicRaycaster>());
+            }
+            finally
+            {
+                Object.DestroyImmediate(prefab.gameObject);
+                if (managerObject != null) Object.DestroyImmediate(managerObject);
+            }
+        }
+
         [UnityTest]
         public IEnumerator PreloadAndOpenAsync_ShareAssetModuleLoad_AndReleaseBothLeases()
         {

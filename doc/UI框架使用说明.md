@@ -83,11 +83,11 @@ UI Manager 负责资源 Lease、单例页面、返回键、层级、共享背景
 
 Loading Prefab 是普通 UI 内容节点，不需要自带 Canvas，也不需要 `EasyUIDisplay`、View 脚本或 `EasyUIManager`。
 
-在普通 Prefab 上挂 `EasyLoadingPresenter`，配置进度条、文本、图片或视频列表，再将 Prefab 赋给 Startup Preset 的 `Loading Display > Prefab`。
+在普通 Prefab 上挂 `EasyLoadingPresenter`，配置进度条、文本、图片或视频列表，再将 Prefab 赋给 Startup Config 的 `全局 Loading > Prefab`。
 
-如果没有显式指定 Prefab，运行时会自动尝试加载 `Resources/LoadingView.prefab`，可直接用于默认启动演示。
+Prefab 为空表示不启用全局 Loading，框架不会隐式加载 Resources 中的同名资源。
 
-`EasyLoadingRuntimeHost` 会创建独立的 Canvas、CanvasScaler 和 GraphicRaycaster，并固定使用不依赖相机的 Overlay，确保启动画面直接渲染。Loading 使用较高的 Sorting Order，启动期间覆盖其他画面。
+`EasyLoadingRuntimeHost` 会创建独立的 Canvas、CanvasScaler 和 GraphicRaycaster，并固定使用不依赖相机的 Overlay，确保加载画面直接渲染。Loading 与 UI 共用启动配置中的参考分辨率、宽高匹配值和 Layer，只单独配置 Prefab 与 Sorting Order。
 
 ```csharp
 await LoadingModule.Instance.LoadSceneAsync("Game");

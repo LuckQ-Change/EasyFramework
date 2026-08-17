@@ -16,22 +16,26 @@ namespace EasyFramework
     [DisallowMultipleComponent]
     public sealed class EasyLoadingPresenter : MonoBehaviour
     {
-        [Header("Progress")] [SerializeField] private Image _progressBar;
+        [Header("进度")]
+        [SerializeField] private Image _progressBar;
         [SerializeField] private Text _progressLabel;
         [SerializeField] private Text _messageLabel;
 
-        [Header("Tips")] [SerializeField] private Text _tipLabel;
+        [Header("提示文本")]
+        [SerializeField] private Text _tipLabel;
         [SerializeField] private string[] _tips = Array.Empty<string>();
         [SerializeField, Min(0.1f)] private float _tipInterval = 4f;
 
-        [Header("Background")] [SerializeField]
+        [Header("背景")]
+        [SerializeField]
         private LoadingBackgroundMode _backgroundMode;
 
         [SerializeField] private Image _imageBackground;
         [SerializeField] private Sprite[] _backgrounds = Array.Empty<Sprite>();
         [SerializeField, Min(0.1f)] private float _backgroundInterval = 6f;
 
-        [Header("Video Playlist")] [SerializeField]
+        [Header("视频列表")]
+        [SerializeField]
         private RawImage _videoBackground;
 
         [SerializeField] private VideoPlayer _videoPlayer;

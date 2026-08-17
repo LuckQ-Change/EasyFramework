@@ -154,7 +154,7 @@ namespace EasyFramework
             }
             catch (Exception ex)
             {
-                Log.Error($"[Pool] destroy callback failed for {typeof(T).Name}: {ex}");
+                Log.Error($"[Pool] destroy callback failed for {typeof(T).Name}.", ex);
             }
         }
     }

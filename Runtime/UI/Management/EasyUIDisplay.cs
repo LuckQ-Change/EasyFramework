@@ -3,21 +3,19 @@ using UnityEngine;
 
 namespace EasyFramework.UI
 {
-    /// <summary>
-    /// Universal prefab display. It creates recorded pure C# View/Item and Binding objects.
-    /// </summary>
+    /// <summary>通用 Prefab 显示组件，负责创建记录的纯 C# View/Item 与 Binding 对象。</summary>
     [AddComponentMenu("EasyFramework/UI/UI Display")]
     [DisallowMultipleComponent]
     [DefaultExecutionOrder(-200)]
     public sealed class EasyUIDisplay : MonoBehaviour
     {
-        [Header("View Script")]
+        [Header("View 脚本")]
         [SerializeField] private string _viewTypeName;
         [SerializeField] private string _viewScriptPath;
         [SerializeField] private string _prefabLocation;
         [SerializeField] private bool _createOnAwake = true;
 
-        [Header("View")]
+        [Header("View 配置")]
         [SerializeField] private bool _managedAsView = true;
         [SerializeField] private string _viewId;
         [SerializeField] private UILayer _defaultLayer = UILayer.Screen;
@@ -25,7 +23,7 @@ namespace EasyFramework.UI
         [SerializeField] private bool _closeOnBack = true;
         [SerializeField] private bool _stretchToLayer = true;
 
-        [Header("Shared Background")]
+        [Header("共享背景")]
         [SerializeField] private UIBackgroundMode _backgroundMode;
         [SerializeField] private bool _closeOnBackground;
         [SerializeField] private Color _backgroundColor = new Color(0f, 0f, 0f, 0.55f);
@@ -87,7 +85,8 @@ namespace EasyFramework.UI
             {
                 if (!string.IsNullOrWhiteSpace(_viewTypeName))
                     throw new InvalidOperationException(
-                        $"{name}: cannot create UI View '{_viewTypeName}'. Resolve its compilation errors.");
+                        $"{name}：无法创建 UI 逻辑“{_viewTypeName}”。" +
+                        "请确认 Prefab 保存的完整类型名与脚本命名空间一致，且脚本已成功编译。");
                 _binding = new EasyUIBinding();
                 _logic = _managedAsView ? (EasyUIObject)new EasyUIView() : new EasyUIItem();
             }
@@ -96,8 +95,8 @@ namespace EasyFramework.UI
             {
                 _binding.Initialize(this);
                 _logic.Initialize(this, _binding);
-                // A managed View owns its binding source. By default that source is
-                // the View itself, while advanced Views may override BindingSource.
+                // 受管理的 View 持有自己的绑定源；默认绑定源就是 View 本身，
+                // 有特殊需求时可重写 BindingSource。
                 if (_managedAsView && BindingContext != null)
                     BindingContext.SetSource(_logic.BindingSource);
                 return _logic;
@@ -169,9 +168,9 @@ namespace EasyFramework.UI
         internal void DisposeContent()
         {
             try { _logic?.Dispose(); }
-            catch (Exception exception) { Log.Error($"[UI] {name}: logic dispose failed: {exception}"); }
+            catch (Exception exception) { Log.Error($"[UI] {name}: logic dispose failed.", exception); }
             try { _binding?.Dispose(); }
-            catch (Exception exception) { Log.Error($"[UI] {name}: binding dispose failed: {exception}"); }
+            catch (Exception exception) { Log.Error($"[UI] {name}: binding dispose failed.", exception); }
             finally
             {
                 _logic = null;

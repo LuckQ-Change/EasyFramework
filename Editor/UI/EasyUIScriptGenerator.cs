@@ -37,9 +37,20 @@ namespace EasyFramework.Editor.UI
             }
 
             AssetDatabase.Refresh(ImportAssetOptions.ForceUpdate);
+            string viewTypeName = namespaceName + "." + className;
+            MonoScript script = AssetDatabase.LoadAssetAtPath<MonoScript>(scriptPath);
+            Type scriptType = script?.GetClass();
+            if (scriptType != null)
+            {
+                if (!typeof(EasyUIObject).IsAssignableFrom(scriptType))
+                    throw new InvalidOperationException(
+                        $"脚本类型“{scriptType.FullName}”必须继承 EasyUIObject。");
+                viewTypeName = $"{scriptType.FullName}, {scriptType.Assembly.GetName().Name}";
+            }
+
             Undo.RecordObject(display, "Generate Easy UI script");
             display.SetViewScript(
-                namespaceName + "." + className,
+                viewTypeName,
                 scriptPath,
                 prefabLocation);
             EditorUtility.SetDirty(display);

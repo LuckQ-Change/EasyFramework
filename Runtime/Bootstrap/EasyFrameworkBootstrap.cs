@@ -9,7 +9,7 @@ namespace EasyFramework
         private static void ResetState()
         {
             ModuleRegistry.ClearRegistrars();
-            EasyFrameworkStartupPreset.ResetRuntimeDefault();
+            EasyFrameworkStartupConfig.ResetRuntimeDefault();
             EasyRuntime.Reset();
         }
 

@@ -26,7 +26,7 @@ namespace EasyFramework.UI
             for (int i = _items.Count - 1; i >= 0; i--)
             {
                 try { _items[i]?.Dispose(); }
-                catch (Exception exception) { Log.Error($"[UI] Dispose binding failed: {exception}"); }
+                catch (Exception exception) { Log.Error("[UI] Dispose binding failed.", exception); }
             }
             _items.Clear();
         }

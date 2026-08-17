@@ -33,7 +33,7 @@ namespace EasyFramework.UI
             }
             catch (Exception exception)
             {
-                Log.Error($"[UI] Cannot read binding '{key}' from {source.GetType().Name}: {exception}");
+                Log.Error($"[UI] Cannot read binding '{key}' from {source.GetType().Name}.", exception);
                 return false;
             }
         }

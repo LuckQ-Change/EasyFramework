@@ -44,7 +44,7 @@ namespace EasyFramework
             }
             catch (Exception ex)
             {
-                Log.Error($"[Hotfix] load failed: {ex}");
+                Log.Error("[Hotfix] load failed.", ex);
                 return null;
             }
         }
@@ -86,7 +86,7 @@ namespace EasyFramework
             }
             catch (Exception ex)
             {
-                Log.Error($"[Hotfix] invoke error: {ex}");
+                Log.Error("[Hotfix] invoke error.", ex);
                 return null;
             }
         }

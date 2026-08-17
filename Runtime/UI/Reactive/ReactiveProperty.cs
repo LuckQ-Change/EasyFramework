@@ -85,7 +85,7 @@ namespace EasyFramework.UI
                     var listener = _listeners[i];
                     if (listener == null) continue;
                     try { listener(value); }
-                    catch (Exception exception) { Log.Error($"[UI] Reactive listener failed: {exception}"); }
+                    catch (Exception exception) { Log.Error("[UI] Reactive listener failed.", exception); }
                 }
             }
             finally

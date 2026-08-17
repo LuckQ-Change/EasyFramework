@@ -45,13 +45,9 @@ namespace EasyFramework
         public static void RegisterDefault(ModuleManager modules)
         {
             if (modules == null) return;
-            modules.Register<LoadingModule>();
-            modules.Register<ProcedureModule>();
             modules.Register<EventModule>();
             modules.Register<TimerModule>();
             modules.Register<PoolModule>();
-            modules.Register<HotfixModule>();
-            modules.Register<AssetModule>();
         }
     }
 }

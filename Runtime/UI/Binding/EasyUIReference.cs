@@ -16,7 +16,7 @@ namespace EasyFramework.UI
         public string ResourceLocation => _resourceLocation;
     }
 
-    /// <summary>Serialized component references exposed through EasyUIBinding.Get.</summary>
+    /// <summary>通过 EasyUIBinding.Get 访问的序列化组件引用。</summary>
     [AddComponentMenu("EasyFramework/UI/Reference Marker")]
     [DisallowMultipleComponent]
     public sealed class EasyUIReference : MonoBehaviour

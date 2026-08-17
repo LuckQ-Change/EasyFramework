@@ -139,7 +139,7 @@ namespace EasyFramework
             }
             if (loader == null) return;
             try { loader.ReleaseAll(); }
-            catch (Exception ex) { Log.Error($"[Asset] release all failed during shutdown: {ex}"); }
+            catch (Exception ex) { Log.Error("[Asset] release all failed during shutdown.", ex); }
             if (pending == null) return;
 
             foreach (var item in pending)
@@ -150,7 +150,7 @@ namespace EasyFramework
 
         private async Task<bool> InitializeCoreAsync(IAssetLoader loader, int generation)
         {
-            // Prevent a synchronously completed loader from racing the assignment of _initializeTask.
+            // 先记录初始化任务，避免同步完成的 Loader 与 _initializeTask 赋值产生竞态。
             await Task.Yield();
             bool succeeded;
             try
@@ -159,7 +159,7 @@ namespace EasyFramework
             }
             catch (Exception ex)
             {
-                Log.Error($"[Asset] initialize failed: {ex}");
+                Log.Error("[Asset] initialize failed.", ex);
                 succeeded = false;
             }
 
@@ -249,7 +249,7 @@ namespace EasyFramework
             try { await loadTask; }
             catch { }
             try { loader.Release(location); }
-            catch (Exception ex) { Log.Error($"[Asset] late release failed for {location}: {ex}"); }
+            catch (Exception ex) { Log.Error($"[Asset] late release failed for {location}.", ex); }
         }
     }
 }

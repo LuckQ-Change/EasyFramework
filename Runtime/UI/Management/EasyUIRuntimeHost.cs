@@ -12,28 +12,24 @@ namespace EasyFramework.UI
         ScreenSpaceCamera,
     }
 
-    /// <summary>
-    /// Minimal Unity adapter for the pure C# EasyUIManager service.
-    /// </summary>
+    /// <summary>连接纯 C# EasyUIManager 服务与 Unity 生命周期的轻量适配器。</summary>
     [AddComponentMenu("EasyFramework/UI/Runtime Host")]
     [DefaultExecutionOrder(-900)]
     [DisallowMultipleComponent]
     [RequireComponent(typeof(Canvas), typeof(UnityEngine.UI.CanvasScaler), typeof(UnityEngine.UI.GraphicRaycaster))]
     public sealed class EasyUIRuntimeHost : MonoBehaviour
     {
-        [Header("Canvas")]
-        [SerializeField] private Vector2 _referenceResolution = new Vector2(1920f, 1080f);
-        [SerializeField, Range(0f, 1f)] private float _matchWidthOrHeight = 0.5f;
-        [SerializeField] private EasyUIRenderMode _renderMode = EasyUIRenderMode.ScreenSpaceOverlay;
-        [SerializeField] private Camera _uiCamera;
-        [SerializeField] private bool _createCameraWhenMissing;
-        [SerializeField] private bool _createEventSystem;
-        [SerializeField] private string _uiLayerName = "UI";
-        [SerializeField] private float _cameraDepth = 100f;
-        [SerializeField, Min(0.01f)] private float _planeDistance = 100f;
-
-        [Header("Shared Background")]
-        [SerializeField] private GameObject _backgroundPrefab;
+        private Vector2 _referenceResolution = new Vector2(1920f, 1080f);
+        private float _matchWidthOrHeight = 0.5f;
+        private EasyUIRenderMode _renderMode = EasyUIRenderMode.ScreenSpaceOverlay;
+        private Camera _uiCamera;
+        private bool _ownsUICamera;
+        private bool _createCameraWhenMissing;
+        private bool _createEventSystem;
+        private string _uiLayerName = "UI";
+        private float _cameraDepth = 100f;
+        private float _planeDistance = 100f;
+        private GameObject _backgroundPrefab;
 
         private EasyUIManager _manager;
         private readonly HashSet<IDisposable> _pendingDisposals = new HashSet<IDisposable>();
@@ -71,8 +67,8 @@ namespace EasyFramework.UI
 
         private void OnDisable()
         {
-            // EditMode destruction/scene changes disable components before OnDestroy.
-            // Detach here so static manager state cannot leak into the next host.
+            // 编辑模式销毁对象或切换场景时，组件会先禁用再销毁。
+            // 在这里解除关联，避免静态 Manager 状态泄漏到下一个 Host。
             if (!Application.isPlaying) DetachManager();
         }
 
@@ -80,12 +76,13 @@ namespace EasyFramework.UI
         {
             foreach (IDisposable disposable in _pendingDisposals) disposable?.Dispose();
             _pendingDisposals.Clear();
+            ReleaseOwnedUICamera();
             DetachManager();
         }
 
         internal void SetManager(EasyUIManager manager) => _manager = manager;
 
-        /// <summary>Apply startup-preset settings to this persistent host.</summary>
+        /// <summary>把启动配置应用到这个持久化 Host。</summary>
         public void Configure(
             EasyUIRenderMode renderMode,
             Camera uiCamera,
@@ -99,7 +96,7 @@ namespace EasyFramework.UI
             GameObject backgroundPrefab = null)
         {
             _renderMode = renderMode;
-            _uiCamera = uiCamera;
+            SetConfiguredUICamera(uiCamera);
             _createCameraWhenMissing = createCameraWhenMissing;
             _createEventSystem = createEventSystem;
             _uiLayerName = string.IsNullOrWhiteSpace(uiLayerName) ? "UI" : uiLayerName;
@@ -129,15 +126,18 @@ namespace EasyFramework.UI
             if (_uiCamera != null)
             {
                 Camera prefab = _uiCamera;
-                _uiCamera = Instantiate(prefab, transform);
+                _uiCamera = Instantiate(prefab);
                 _uiCamera.name = "[EasyUI Camera]";
+                _ownsUICamera = true;
+                KeepCameraAcrossScenes(_uiCamera);
                 return ConfigureUICamera(_uiCamera);
             }
             if (!_createCameraWhenMissing) return null;
 
             var cameraObject = new GameObject("[EasyUI Camera]", typeof(Camera));
-            cameraObject.transform.SetParent(transform, false);
             _uiCamera = cameraObject.GetComponent<Camera>();
+            _ownsUICamera = true;
+            KeepCameraAcrossScenes(_uiCamera);
             return ConfigureUICamera(_uiCamera);
         }
 
@@ -154,6 +154,30 @@ namespace EasyFramework.UI
             return camera;
         }
 
+        private void SetConfiguredUICamera(Camera configuredCamera)
+        {
+            if (!_ownsUICamera && _uiCamera == configuredCamera) return;
+            ReleaseOwnedUICamera();
+            _uiCamera = configuredCamera;
+            _ownsUICamera = false;
+        }
+
+        private void ReleaseOwnedUICamera()
+        {
+            if (!_ownsUICamera) return;
+            Camera ownedCamera = _uiCamera;
+            _uiCamera = null;
+            _ownsUICamera = false;
+            if (ownedCamera != null) DestroyUnityObject(ownedCamera.gameObject);
+        }
+
+        private static void KeepCameraAcrossScenes(Camera camera)
+        {
+            if (camera == null) return;
+            camera.transform.SetParent(null, true);
+            if (Application.isPlaying) DontDestroyOnLoad(camera.gameObject);
+        }
+
         private void EnsureEventSystem()
         {
             if (EventSystem.current != null || FindObjectOfType<EventSystem>(true) != null) return;
@@ -167,7 +191,11 @@ namespace EasyFramework.UI
         private int ResolveUILayer()
         {
             int layer = LayerMask.NameToLayer(_uiLayerName);
-            return layer < 0 ? 5 : layer;
+            if (layer >= 0) return layer;
+
+            int fallback = LayerMask.NameToLayer("UI");
+            Log.Warn($"[UI] Layer '{_uiLayerName}' 不存在，已回退到 '{(fallback >= 0 ? "UI" : "Default")}'。");
+            return fallback >= 0 ? fallback : 0;
         }
 
         private void DetachManager()

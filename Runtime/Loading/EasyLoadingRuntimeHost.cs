@@ -3,7 +3,7 @@ using UnityEngine.UI;
 
 namespace EasyFramework
 {
-    /// <summary>Owns the overlay Canvas used only by the global loading display.</summary>
+    /// <summary>管理仅供全局 Loading 使用的 Overlay Canvas。</summary>
     [DisallowMultipleComponent]
     [RequireComponent(typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster))]
     public sealed class EasyLoadingRuntimeHost : MonoBehaviour
@@ -16,11 +16,19 @@ namespace EasyFramework
 
         public Canvas Canvas => _canvas != null ? _canvas : GetComponent<Canvas>();
 
-        public static EasyLoadingRuntimeHost Ensure(EasyLoadingSettings settings)
+        public static EasyLoadingRuntimeHost Ensure(
+            EasyLoadingSettings settings,
+            string layerName,
+            Vector2 referenceResolution,
+            float matchWidthOrHeight)
         {
-            if (settings == null || settings.Prefab == null) return null;
-
             EasyLoadingRuntimeHost host = FindObjectOfType<EasyLoadingRuntimeHost>(true);
+            if (settings == null || settings.Prefab == null)
+            {
+                if (host != null) DestroyUnityObject(host.gameObject);
+                return null;
+            }
+
             if (host == null)
             {
                 var root = new GameObject(
@@ -36,13 +44,19 @@ namespace EasyFramework
 
             if (!host.gameObject.activeSelf) host.gameObject.SetActive(true);
             if (!host.enabled) host.enabled = true;
-            host.Configure(settings);
+            host.Configure(settings, layerName, referenceResolution, matchWidthOrHeight);
             return host;
         }
 
-        public void Configure(EasyLoadingSettings settings)
+        public void Configure(
+            EasyLoadingSettings settings,
+            string layerName,
+            Vector2 referenceResolution,
+            float matchWidthOrHeight)
         {
             if (settings == null) throw new System.ArgumentNullException(nameof(settings));
+            if (settings.Prefab == null)
+                throw new System.ArgumentException("Loading 配置必须指定 Prefab。", nameof(settings));
 
             if (_settings != null && _settings.Prefab != settings.Prefab)
             {
@@ -59,19 +73,19 @@ namespace EasyFramework
             _scaler.enabled = true;
             raycaster.enabled = true;
 
-            int layer = LayerMask.NameToLayer(settings.LayerName);
-            if (layer < 0) layer = 5;
+            int layer = ResolveLayer(layerName);
             gameObject.layer = layer;
 
             _canvas.overrideSorting = true;
             _canvas.sortingOrder = settings.SortingOrder;
             _scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-            _scaler.referenceResolution = settings.ReferenceResolution;
+            _scaler.referenceResolution = new Vector2(
+                Mathf.Max(1f, referenceResolution.x),
+                Mathf.Max(1f, referenceResolution.y));
             _scaler.screenMatchMode = CanvasScaler.ScreenMatchMode.MatchWidthOrHeight;
-            _scaler.matchWidthOrHeight = settings.MatchWidthOrHeight;
+            _scaler.matchWidthOrHeight = Mathf.Clamp01(matchWidthOrHeight);
 
-            // Startup Loading is always an overlay. This avoids stale preset camera settings,
-            // camera culling masks and render-pipeline camera composition entirely.
+            // Loading 固定使用 Overlay，避免受相机裁剪、相机堆叠和渲染管线配置影响。
             RemoveLegacyCamera();
             _canvas.renderMode = RenderMode.ScreenSpaceOverlay;
             _canvas.worldCamera = null;
@@ -84,6 +98,14 @@ namespace EasyFramework
         {
             EnsureSubscription();
             if (_subscribedModule != null) Apply(_subscribedModule.State);
+        }
+
+        private void LateUpdate()
+        {
+            LoadingModule module = LoadingModule.Instance;
+            if (ReferenceEquals(module, _subscribedModule)) return;
+            EnsureSubscription();
+            Apply(module != null ? module.State : default(LoadingState));
         }
 
         private void OnDisable() => RemoveSubscription();
@@ -157,6 +179,17 @@ namespace EasyFramework
             root.gameObject.layer = layer;
             for (int i = 0; i < root.childCount; i++)
                 SetLayerRecursively(root.GetChild(i), layer);
+        }
+
+        private static int ResolveLayer(string layerName)
+        {
+            string requested = string.IsNullOrWhiteSpace(layerName) ? "UI" : layerName;
+            int layer = LayerMask.NameToLayer(requested);
+            if (layer >= 0) return layer;
+
+            int fallback = LayerMask.NameToLayer("UI");
+            Log.Warn($"[Loading] Layer '{requested}' 不存在，已回退到 '{(fallback >= 0 ? "UI" : "Default")}'。");
+            return fallback >= 0 ? fallback : 0;
         }
 
         private static void DestroyUnityObject(Object target)
