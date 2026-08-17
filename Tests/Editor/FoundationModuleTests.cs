@@ -19,6 +19,32 @@ namespace EasyFramework.Tests
         }
 
         [Test]
+        public void Log_ErrorWithException_PreservesOriginalException()
+        {
+            Action<string, Exception> previous = Log.ExceptionHandler;
+            string actualMessage = null;
+            Exception actualException = null;
+            var expected = new InvalidOperationException("测试异常");
+            try
+            {
+                Log.ExceptionHandler = (message, exception) =>
+                {
+                    actualMessage = message;
+                    actualException = exception;
+                };
+
+                Log.Error("测试消息", expected);
+
+                Assert.AreEqual("测试消息", actualMessage);
+                Assert.AreSame(expected, actualException);
+            }
+            finally
+            {
+                Log.ExceptionHandler = previous;
+            }
+        }
+
+        [Test]
         public void Event_UnsubscribeDuringDispatch_DoesNotAllocateSnapshotOrInvokeRemovedHandler()
         {
             var manager = new ModuleManager();

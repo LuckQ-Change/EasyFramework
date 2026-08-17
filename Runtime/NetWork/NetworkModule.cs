@@ -83,7 +83,7 @@ namespace EasyFramework
                 }
                 catch (Exception ex)
                 {
-                    Log.Error($"[Network] dispatch error: {ex}");
+                    Log.Error("[Network] dispatch error.", ex);
                 }
             }
         }

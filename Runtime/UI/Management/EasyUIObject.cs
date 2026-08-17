@@ -2,7 +2,7 @@ using System;
 
 namespace EasyFramework.UI
 {
-    /// <summary>Base class for UI business objects. It has no Unity component lifetime.</summary>
+    /// <summary>UI 业务对象基类，不依赖 Unity 组件生命周期。</summary>
     public abstract class EasyUIObject : IDisposable
     {
         public EasyUIDisplay Display { get; private set; }
@@ -10,7 +10,7 @@ namespace EasyFramework.UI
         public EasyUIManager Manager => Display == null ? null : Display.Manager;
         public bool IsDisposed { get; private set; }
 
-        /// <summary>Override when bindings should read a separate presentation source.</summary>
+        /// <summary>绑定需要读取独立展示数据源时重写。</summary>
         public virtual object BindingSource => this;
 
         internal void Initialize(EasyUIDisplay display, EasyUIBinding binding)
@@ -39,11 +39,10 @@ namespace EasyFramework.UI
             }
         }
 
-        // Kept inside the runtime assembly so framework-owned resources cannot be
-        // accidentally skipped by a user override of OnDispose.
+        // 由运行时程序集统一释放框架资源，避免用户重写 OnDispose 时意外漏掉清理。
         private protected virtual void ReleaseOwnedResources() { }
     }
 
-    /// <summary>Reusable pure C# item base. Derive Item, CostItem and other item families from it.</summary>
+    /// <summary>可复用的纯 C# Item 基类，Item、CostItem 等业务条目可由此派生。</summary>
     public class EasyUIItem : EasyUIObject { }
 }

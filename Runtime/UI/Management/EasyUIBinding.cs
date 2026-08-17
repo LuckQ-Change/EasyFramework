@@ -5,7 +5,7 @@ using UnityEngine;
 
 namespace EasyFramework.UI
 {
-    /// <summary>Runtime access to references serialized on EasyUIReference markers.</summary>
+    /// <summary>在运行时访问 EasyUIReference 标记中序列化的引用。</summary>
     public class EasyUIBinding : IDisposable
     {
         public EasyUIDisplay Display { get; private set; }

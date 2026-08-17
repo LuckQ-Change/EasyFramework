@@ -8,7 +8,7 @@ using Object = UnityEngine.Object;
 
 namespace EasyFramework.UI
 {
-    /// <summary>Pure C# UI service. Unity lifecycle work is delegated to EasyUIRuntimeHost.</summary>
+    /// <summary>纯 C# UI 服务，Unity 生命周期由 EasyUIRuntimeHost 承接。</summary>
     public sealed class EasyUIManager
     {
         private static EasyUIManager _instance;
@@ -67,11 +67,6 @@ namespace EasyFramework.UI
             _instance = null;
             _quitting = false;
         }
-
-#if !EASY_UI_NO_AUTO_MANAGER
-        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
-        private static void AutoCreate() => _ = Instance;
-#endif
 
         internal static EasyUIManager UseHost(EasyUIRuntimeHost host)
         {
@@ -206,7 +201,7 @@ namespace EasyFramework.UI
             }
         }
 
-        /// <summary>Open by the prefab location generated for TView.</summary>
+        /// <summary>使用 TView 上记录的 Prefab 地址打开界面。</summary>
         public Task<TView> OpenAsync<TView>(UILayer? layer = null) where TView : EasyUIView =>
             OpenGeneratedAsync<TView>(null, layer);
 
@@ -366,8 +361,8 @@ namespace EasyFramework.UI
 
         internal void NotifyViewDestroyed(EasyUIDisplay display)
         {
-            // Unity objects compare equal to null while their OnDestroy callback is
-            // running. ReferenceEquals is required so the dead entry is still removed.
+            // Unity 对象执行 OnDestroy 时会与 null 比较相等；这里必须使用
+            // ReferenceEquals，才能继续移除这条已经失效的记录。
             if (_shuttingDown || ReferenceEquals(display, null)) return;
             _openOrder.Remove(display);
             RemoveSingleton(display);
@@ -389,8 +384,9 @@ namespace EasyFramework.UI
         {
             if (_host != host || _shuttingDown) return;
             EnsureRootCanvas();
+            int unityLayer = _host.UILayer;
             foreach (RectTransform root in _layerRoots.Values)
-                if (root != null) root.gameObject.layer = _host.UILayer;
+                if (root != null) SetUnityLayerRecursively(root, unityLayer);
         }
 
         private EasyUIDisplay OpenPrefab(GameObject prefab, object args, UILayer? layer, out bool created)
@@ -432,6 +428,8 @@ namespace EasyFramework.UI
         private void RegisterOpenedDisplay(EasyUIDisplay display, string key, UILayer layer, object args)
         {
             display.transform.SetParent(GetLayerRoot(layer), false);
+            RemoveRootCanvasComponents(display);
+            SetUnityLayerRecursively(display.transform, _host.UILayer);
             display.Initialize(this, layer);
             ApplyLayout(display);
             if (!_openOrder.Contains(display)) _openOrder.Add(display);
@@ -534,6 +532,7 @@ namespace EasyFramework.UI
                     "[Background]", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image), typeof(Button));
             if (!(background.transform is RectTransform))
                 throw new InvalidOperationException("Easy UI shared Background prefab root must use RectTransform.");
+            SetUnityLayerRecursively(background.transform, _host.UILayer);
             _background = background.GetComponent<EasyUIBackground>() ?? background.AddComponent<EasyUIBackground>();
             background.SetActive(false);
         }
@@ -573,6 +572,38 @@ namespace EasyFramework.UI
             if (display.StretchToLayer && display.transform is RectTransform rect) Stretch(rect);
         }
 
+        private static void SetUnityLayerRecursively(Transform root, int layer)
+        {
+            if (root == null) return;
+            root.gameObject.layer = layer;
+            for (int i = 0; i < root.childCount; i++)
+                SetUnityLayerRecursively(root.GetChild(i), layer);
+        }
+
+        private static void RemoveRootCanvasComponents(EasyUIDisplay display)
+        {
+            // 受管理 View 复用框架创建的分层 Canvas。Prefab 根节点残留的独立
+            // Canvas（尤其是 World Space）会脱离该渲染链；子节点 Canvas 不处理。
+            GraphicRaycaster raycaster = display.GetComponent<GraphicRaycaster>();
+            if (raycaster != null)
+            {
+                raycaster.enabled = false;
+                DestroyUnityObject(raycaster);
+            }
+
+            CanvasScaler scaler = display.GetComponent<CanvasScaler>();
+            if (scaler != null)
+            {
+                scaler.enabled = false;
+                DestroyUnityObject(scaler);
+            }
+
+            Canvas canvas = display.GetComponent<Canvas>();
+            if (canvas == null) return;
+            canvas.enabled = false;
+            DestroyUnityObject(canvas);
+        }
+
         private static void Stretch(RectTransform rect)
         {
             rect.anchorMin = Vector2.zero;
@@ -594,9 +625,8 @@ namespace EasyFramework.UI
             if (_host != null || _shuttingDown || _quitting) return;
             var existing = Object.FindObjectOfType<EasyUIRuntimeHost>(true);
             if (existing != null) { AttachHost(existing); return; }
-            // Create the required Canvas stack before EasyUIRuntimeHost.Awake attaches
-            // the manager. This avoids AddComponent/OnValidate re-entry while the host
-            // is building its first layer roots in EditMode and at startup.
+            // 先创建完整 Canvas 组件栈，再由 EasyUIRuntimeHost.Awake 关联 Manager，
+            // 避免编辑模式或启动阶段首次创建层级根节点时发生 AddComponent/OnValidate 重入。
             var hostObject = new GameObject(
                 "[EasyUI]",
                 typeof(RectTransform),

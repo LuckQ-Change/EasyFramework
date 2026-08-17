@@ -1,5 +1,18 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- 移除框架程序集中的具体业务流程与流程专用启动配置，项目流程现在可直接引用项目 UI 和脚本。
+- 启动配置支持在 Inspector 中选择项目的首流程脚本，并由 Launcher 自动注册和启动。
+- `StartAsync`、`ChangeAsync` 和 `Next` 支持按需自动注册具有公开无参构造函数的流程。
+- 流程、Loading、资源与热更基础模块改为由项目按需注册。
+- `ProcedureContext` 改为可继承、幂等释放的业务上下文基类，流程支持注册带构造参数的实例。
+- UI 与 Loading 共用唯一一套屏幕适配和 Layer 配置；Loading 不再隐式加载 `Resources/LoadingView`。
+- 关闭 UI 启动后不再由自动 Manager 绕过配置创建 UI 根节点。
+- Runtime 源码注释和主要 Inspector 分组统一为中文。
+
 ## [0.1.0] - 2026-08-11
 
 ### Changed

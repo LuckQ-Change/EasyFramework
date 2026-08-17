@@ -19,7 +19,7 @@ namespace EasyFramework
         }
     }
 
-    /// <summary>UI-independent loading state shared by startup and scene transitions.</summary>
+    /// <summary>不依赖具体 UI 实现的全局加载状态，可供启动和场景切换共用。</summary>
     public sealed class LoadingModule : ModuleSingleton<LoadingModule>
     {
         private sealed class LoadingScope : IDisposable

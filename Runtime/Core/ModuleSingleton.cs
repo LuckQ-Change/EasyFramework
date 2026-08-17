@@ -34,6 +34,7 @@ namespace EasyFramework
                     $"[{typeof(T).Name}] singleton already exists. Register modules through ModuleManager only.");
             }
             Instance = (T)this;
+            Log.Info( $"[{typeof(T).Name}] Registered");
         }
 
         internal sealed override void UnregisterInstance()

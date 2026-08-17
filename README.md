@@ -12,9 +12,9 @@ EasyFramework 是面向 Unity 2022.3 LTS 的轻量游戏框架，采用单包、
 TimerModule.Instance.Delay(1f, () => Log.Info("hello"));
 ```
 
-自动启动会应用内置启动预设：创建持久化 UI 根节点、独立 UI Camera、Canvas 和 EventSystem。
-可通过 `Assets/Create/EasyFramework/Startup Preset` 创建自定义预设，并挂到场景中的
-`EasyFrameworkLauncher`；自动创建 Launcher 时，也可以把预设保存为任意 `Resources/EasyFrameworkStartupPreset.asset`。
+自动启动会应用内置启动配置：创建持久化 UI 根节点、独立 UI Camera、Canvas 和 EventSystem。
+可通过 `Assets/Create/EasyFramework/Startup Config` 创建自定义配置，并挂到场景中的
+`EasyFrameworkLauncher`；自动创建 Launcher 时，也可以把配置保存为 `Resources/EasyFrameworkStartupConfig.asset`。
 
 按需模块通过 `ModuleRegistry.AddRegistrar` 注册：
 
@@ -49,8 +49,9 @@ UI 使用通用 `EasyUIDisplay`、纯 C# View/Item、可再生 Binding、响应�
 ## 当前启动架构
 
 - UI 只生成一个 `Args + View` 脚本；Prefab 引用由运行时 Binding 读取，不强制 ViewModel。
-- 默认流程：`Startup → Resource → HotUpdate → Preload → Login → Game → Exit`。
+- 框架只保留流程基类、上下文和调度模块；具体流程由项目定义，可直接访问项目 UI 与业务脚本。
 - 运行模式：Editor、Online、Offline、Web。
-- 全局 Loading 不依赖 UI 框架，支持启动加载、场景切换、图片轮换、视频列表、进度和配置文本轮询。
+- UI 与全局 Loading 共用一套屏幕适配配置；Loading Prefab 为空时不创建，也不会隐式查找 Resources。
+- 全局 Loading 不依赖 UI 框架，支持场景切换、图片轮换、视频列表、进度和配置文本轮询。
 
 详见 [启动流程与运行模式](doc/启动流程与运行模式.md) 和 [UI 框架使用说明](doc/UI框架使用说明.md)。

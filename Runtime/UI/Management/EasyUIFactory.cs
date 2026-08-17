@@ -49,7 +49,32 @@ namespace EasyFramework.UI
                 type = assembly.GetType(typeName, false);
                 if (type != null) return type;
             }
-            return null;
+
+            string fullName = typeName.Split(',')[0].Trim();
+            int separator = fullName.LastIndexOf('.');
+            string simpleName = separator < 0 ? fullName : fullName.Substring(separator + 1);
+            Type uniqueMatch = null;
+            foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                Type[] types;
+                try { types = assembly.GetTypes(); }
+                catch (ReflectionTypeLoadException exception) { types = exception.Types; }
+
+                for (int i = 0; i < types.Length; i++)
+                {
+                    Type candidate = types[i];
+                    if (candidate == null || candidate.Name != simpleName ||
+                        !typeof(EasyUIObject).IsAssignableFrom(candidate))
+                        continue;
+                    if (uniqueMatch != null && uniqueMatch != candidate)
+                        return null;
+                    uniqueMatch = candidate;
+                }
+            }
+
+            if (uniqueMatch != null)
+                Log.Warn($"[UI] 类型“{typeName}”不存在，已按唯一类名解析为“{uniqueMatch.FullName}”。请重新保存 Prefab。");
+            return uniqueMatch;
         }
     }
 }

@@ -27,24 +27,24 @@ namespace EasyFramework.Editor.UI
             if (manager == null)
             {
                 EditorGUILayout.HelpBox(
-                    "UI manager is unavailable while the application is quitting.",
+                    "应用退出期间无法使用 UI Manager。",
                     MessageType.Info);
                 return;
             }
 
             EditorGUILayout.Space();
-            EditorGUILayout.LabelField("Layers", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("UI 层级", EditorStyles.boldLabel);
             foreach (UILayer layer in System.Enum.GetValues(typeof(UILayer)))
             {
                 RectTransform root = manager.GetLayerRoot(layer);
                 EditorGUILayout.LabelField(
                     layer.ToString(),
-                    root == null ? "Missing" : $"Sorting {(int)layer} · {root.childCount} views");
+                    root == null ? "缺失" : $"排序值 {(int)layer} · {root.childCount} 个界面");
             }
 
             if (!Application.isPlaying) return;
             EditorGUILayout.Space();
-            EditorGUILayout.LabelField($"Open Views ({manager.OpenCount})", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField($"已打开界面（{manager.OpenCount}）", EditorStyles.boldLabel);
             for (int i = manager.OpenDisplays.Count - 1; i >= 0; i--)
             {
                 EasyUIDisplay display = manager.OpenDisplays[i];
@@ -52,8 +52,8 @@ namespace EasyFramework.Editor.UI
                     EditorGUILayout.ObjectField(display.CurrentLayer.ToString(), display, typeof(EasyUIDisplay), true);
             }
             EditorGUILayout.BeginHorizontal();
-            if (GUILayout.Button("Back / Close Top")) manager.Back();
-            if (GUILayout.Button("Close All")) manager.CloseAll();
+            if (GUILayout.Button("返回 / 关闭顶层")) manager.Back();
+            if (GUILayout.Button("关闭全部")) manager.CloseAll();
             EditorGUILayout.EndHorizontal();
         }
     }

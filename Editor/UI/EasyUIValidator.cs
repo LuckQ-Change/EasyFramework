@@ -30,7 +30,20 @@ namespace EasyFramework.Editor.UI
         {
             var problems = new List<string>();
             if (display == null) { problems.Add("缺少 EasyUIDisplay。"); return problems; }
-            if (string.IsNullOrWhiteSpace(display.ViewTypeName)) problems.Add("尚未生成 View 脚本。");
+            if (string.IsNullOrWhiteSpace(display.ViewTypeName))
+            {
+                problems.Add("尚未选择 View 类脚本。");
+            }
+            else
+            {
+                Type viewType = Type.GetType(display.ViewTypeName, false);
+                if (viewType == null)
+                    problems.Add("记录的 View 类型无法加载，请重新选择 View 类脚本。");
+                else if (!typeof(EasyUIObject).IsAssignableFrom(viewType))
+                    problems.Add($"记录的类型“{viewType.FullName}”没有继承 EasyUIObject。");
+                else if (display.ManagedAsView && !typeof(EasyUIView).IsAssignableFrom(viewType))
+                    problems.Add($"记录的类型“{viewType.FullName}”没有继承 EasyUIView。");
+            }
             if (display.ManagedAsView && string.IsNullOrWhiteSpace(display.PrefabLocation))
                 problems.Add("View 缺少 Prefab Location。");
             if (!string.IsNullOrWhiteSpace(display.ViewScriptPath) &&

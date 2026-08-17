@@ -2,12 +2,26 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using NUnit.Framework;
-using UnityEngine;
 
 namespace EasyFramework.Tests
 {
     public sealed class ProcedureAndLoadingTests
     {
+        private sealed class ProjectScript
+        {
+            public int CallCount;
+        }
+
+        private sealed class ProjectProcedureContext : ProcedureContext
+        {
+            public ProjectScript Script { get; }
+            public int DisposeCount { get; private set; }
+
+            public ProjectProcedureContext(ProjectScript script) => Script = script;
+
+            protected override void OnDispose() => DisposeCount++;
+        }
+
         private sealed class FirstProcedure : ProcedureBase
         {
             public static int EnterCount;
@@ -16,6 +30,7 @@ namespace EasyFramework.Tests
             protected override Task<Type> OnEnterAsync(CancellationToken cancellationToken)
             {
                 EnterCount++;
+                RequireContext<ProjectProcedureContext>().Script.CallCount++;
                 return Next<SecondProcedure>();
             }
         }
@@ -33,30 +48,32 @@ namespace EasyFramework.Tests
         }
 
         [Test]
-        public void ProcedureModule_FollowsAutomaticChain_AndStopsAtStay()
+        public void ProcedureModule_AutoRegistersProcedureChain_AndStopsAtStay()
         {
             var modules = new ModuleManager();
-            var preset = ScriptableObject.CreateInstance<EasyFrameworkStartupPreset>();
+            var projectScript = new ProjectScript();
+            var context = new ProjectProcedureContext(projectScript);
             try
             {
                 FirstProcedure.EnterCount = 0;
                 SecondProcedure.EnterCount = 0;
                 ProcedureModule procedures = modules.Register<ProcedureModule>();
                 modules.InitAll();
-                procedures.Register<FirstProcedure>();
-                procedures.Register<SecondProcedure>();
-
-                procedures.StartAsync<FirstProcedure>(new ProcedureContext(preset))
+                procedures.StartAsync<FirstProcedure>(context)
                     .GetAwaiter().GetResult();
 
                 Assert.AreEqual(1, FirstProcedure.EnterCount);
                 Assert.AreEqual(1, SecondProcedure.EnterCount);
+                Assert.AreEqual(1, projectScript.CallCount);
                 Assert.AreEqual(typeof(SecondProcedure), procedures.ActiveProcedureType);
+
+                modules.ShutdownAll();
+                Assert.IsTrue(context.IsDisposed);
+                Assert.AreEqual(1, context.DisposeCount);
             }
             finally
             {
                 modules.ShutdownAll();
-                UnityEngine.Object.DestroyImmediate(preset);
             }
         }
 

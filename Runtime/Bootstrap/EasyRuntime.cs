@@ -8,7 +8,7 @@ namespace EasyFramework
         Web,
     }
 
-    /// <summary>Process-wide runtime profile, selected before modules are initialized.</summary>
+    /// <summary>进程级运行环境，在模块初始化前确定。</summary>
     public static class EasyRuntime
     {
         public static EasyRuntimeMode Mode { get; private set; } = EasyRuntimeMode.Editor;

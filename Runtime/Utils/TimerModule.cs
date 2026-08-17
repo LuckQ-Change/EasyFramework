@@ -90,7 +90,7 @@ namespace EasyFramework
                 }
                 catch (Exception ex)
                 {
-                    Log.Error($"[Timer] callback error: {ex}");
+                    Log.Error("[Timer] callback error.", ex);
                 }
 
                 if (t.Repeat)

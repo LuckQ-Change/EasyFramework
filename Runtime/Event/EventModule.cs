@@ -55,7 +55,7 @@ namespace EasyFramework
                         }
                         catch (Exception ex)
                         {
-                            Log.Error($"[Event] handler error for {typeof(T).Name}: {ex}");
+                            Log.Error($"[Event] handler error for {typeof(T).Name}.", ex);
                         }
                     }
                 }

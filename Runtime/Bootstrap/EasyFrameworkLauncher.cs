@@ -1,3 +1,5 @@
+using System;
+using System.Threading.Tasks;
 using UnityEngine;
 
 namespace EasyFramework
@@ -8,12 +10,12 @@ namespace EasyFramework
     {
         private static EasyFrameworkLauncher _instance;
 
-        [SerializeField] private EasyFrameworkStartupPreset _startupPreset;
-        private EasyFrameworkStartupPreset _activePreset;
+        [SerializeField] private EasyFrameworkStartupConfig _startupConfig;
+        private EasyFrameworkStartupConfig _activeConfig;
 
         public static EasyFrameworkLauncher Instance => _instance;
-        public EasyFrameworkStartupPreset StartupPreset => _startupPreset;
-        public EasyFrameworkStartupPreset ActivePreset => _activePreset;
+        public EasyFrameworkStartupConfig StartupConfig => _startupConfig;
+        public EasyFrameworkStartupConfig ActiveConfig => _activeConfig;
 
         private void Awake()
         {
@@ -22,19 +24,27 @@ namespace EasyFramework
                 Destroy(gameObject);
                 return;
             }
+
             _instance = this;
             DontDestroyOnLoad(gameObject);
 
             RedirectLogToUnity();
             try
             {
-                _activePreset = EasyFrameworkStartupPreset.Resolve(_startupPreset);
-                EasyRuntime.Configure(_activePreset.RuntimeMode);
-                EasyEntry.Init(ModuleRegistry.ApplyAll);
-                if (_activePreset.StartProcedureFlow)
-                    _ = StartFlowSafelyAsync(_activePreset);
-                else
-                    _activePreset.Apply();
+                _activeConfig = EasyFrameworkStartupConfig.Resolve(_startupConfig);
+                EasyRuntime.Configure(_activeConfig.RuntimeMode);
+                Type startupProcedureType = _activeConfig.StartupProcedureType;
+                EasyEntry.Init(modules =>
+                {
+                    ModuleRegistry.ApplyAll(modules);
+                    if (startupProcedureType != null)
+                    {
+                        modules.Register<ProcedureModule>();
+                    }
+                });
+                _activeConfig.Apply();
+                if (startupProcedureType != null)
+                    _ = StartProcedureSafelyAsync(startupProcedureType);
             }
             catch
             {
@@ -52,7 +62,7 @@ namespace EasyFramework
         private void OnApplicationQuit()
         {
             EasyEntry.Shutdown();
-            _activePreset = null;
+            _activeConfig = null;
             _instance = null;
         }
 
@@ -61,7 +71,7 @@ namespace EasyFramework
             if (_instance == this)
             {
                 EasyEntry.Shutdown();
-                _activePreset = null;
+                _activeConfig = null;
                 _instance = null;
             }
         }
@@ -77,16 +87,21 @@ namespace EasyFramework
                     default: Debug.Log(msg); break;
                 }
             };
+            Log.ExceptionHandler = (_, exception) => Debug.LogException(exception);
         }
 
-        private static async System.Threading.Tasks.Task StartFlowSafelyAsync(
-            EasyFrameworkStartupPreset preset)
+        private static async Task StartProcedureSafelyAsync(Type startupProcedureType)
         {
-            try { await preset.StartFlowAsync(); }
-            catch (System.OperationCanceledException) { }
-            catch (System.Exception exception)
+            try
             {
-                Log.Error($"[Startup] procedure flow failed: {exception}");
+                await ProcedureModule.Instance.StartAsync(
+                    startupProcedureType,
+                    new ProcedureContext());
+            }
+            catch (OperationCanceledException) { }
+            catch (Exception exception)
+            {
+                Log.Error("[Startup] 启动流程执行失败。", exception);
             }
         }
     }
