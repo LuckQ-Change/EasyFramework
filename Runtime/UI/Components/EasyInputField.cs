@@ -3,6 +3,6 @@ using UnityEngine.UI;
 
 namespace EasyFramework.UI
 {
-    [AddComponentMenu("EasyFramework/UI/Input Field"), RequireComponent(typeof(EasyUIElement))]
+    [AddComponentMenu("EasyFramework/UI/Input Field")]
     public class EasyInputField : InputField, IEasyUIComponent { }
 }

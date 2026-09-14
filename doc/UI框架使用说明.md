@@ -102,3 +102,29 @@ await LoadingModule.Instance.RunAsync(
 ```
 
 `LoadingModule` 只维护 `IsLoading`、`Progress`、`Message` 和 `Changed` 事件，不引用 EasyFramework UI。
+
+## 6. 原生 UGUI 与 Easy 组件
+
+页面里直接用 Unity 自带的 Image、Button、Text 即可。`EasyUIReference`、状态机和 Binding 都不要求先换成 Easy 组件。
+
+只有需要 **Sprite 列表 / 按索引切图** 时，才把 Image 换成 `EasyImage`：
+
+- Inspector 标题栏：仅 Image / EasyImage 显示切换按钮
+- `Tools/EasyFramework/UI/切换选中层级 Image 为 EasyImage`
+- 组件右键菜单仍可转换其它包装类型，但那些包装没有额外能力
+
+切换不会再自动挂上 `EasyUIElement`。状态机是单独加的。
+
+## 7. UI 状态机
+
+在根节点挂 `EasyUIStateController`，只在**会随状态变化的节点**上挂 `EasyUIElement`。
+
+推荐编辑顺序：
+
+1. 在 Controller 的状态列表里添加任意多个状态（如 Normal、Hover、Disabled），并指定当前状态
+2. 点状态名，子节点会立刻切换到该状态
+3. 在 Scene / Inspector 里改颜色、图片、显隐
+4. 点“将当前外观记录到当前状态”
+5. 保存 Prefab 时会先写入默认外观，随后仍回到当前状态，避免把预览结果存进资源
+
+未勾选的属性沿用默认外观。工作台 `Tools/EasyFramework/UI/State Workbench` 用来按“状态 × 节点”查看和记录。不同分组可以把 Controller 挂在不同父节点上，子节点会跟随最近的父级 Controller。

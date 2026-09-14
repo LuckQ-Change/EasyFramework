@@ -1,4 +1,3 @@
-using System;
 using System.Linq;
 using EasyFramework.UI;
 using UnityEditor;
@@ -33,30 +32,37 @@ namespace EasyFramework.Editor.UI
                 "Controller", _controller, typeof(EasyUIStateController), true);
             if (_controller == null)
             {
-                EditorGUILayout.HelpBox("选择一个 State Controller，以“状态 × 节点”方式集中预览和定位配置。", MessageType.Info);
+                EditorGUILayout.HelpBox(
+                    "选择一个 State Controller。点状态名会立刻应用到子节点；改完外观后记录到当前状态。",
+                    MessageType.Info);
                 return;
             }
 
+            _controller.SyncChildVariants();
+            DrawStateBar();
             EditorGUILayout.BeginHorizontal();
-            foreach (string state in _controller.States)
+            if (GUILayout.Button("将当前外观记录到当前状态"))
+                RecordCurrent();
+            if (GUILayout.Button("同步子节点变体"))
             {
-                bool selected = _controller.SelectedState == state;
-                if (GUILayout.Toggle(selected, state, EditorStyles.miniButton) && !selected)
-                {
-                    Undo.RecordObjects(
-                        _controller.GetComponentsInChildren<Component>(true),
-                        "Preview Easy UI state");
-                    _controller.SetState(state);
-                    SceneView.RepaintAll();
-                }
+                Undo.RecordObjects(_controller.GetComponentsInChildren<EasyUIElement>(true), "Sync Easy UI variants");
+                _controller.SyncChildVariants();
+                EditorUtility.SetDirty(_controller);
             }
             EditorGUILayout.EndHorizontal();
 
             EasyUIElement[] elements = _controller.GetComponentsInChildren<EasyUIElement>(true)
-                .Where(item => item.Controller == _controller).ToArray();
+                .Where(item => item.BelongsTo(_controller)).ToArray();
+            if (elements.Length == 0)
+            {
+                EditorGUILayout.HelpBox(
+                    "还没有 EasyUIElement。在需要随状态变化的节点上添加该组件，不必先把 Image/Button 换成 Easy 组件。",
+                    MessageType.Info);
+            }
+
             _scroll = EditorGUILayout.BeginScrollView(_scroll);
             EditorGUILayout.BeginHorizontal(EditorStyles.toolbar);
-            GUILayout.Label("Display Node", GUILayout.Width(220f));
+            GUILayout.Label("节点", GUILayout.Width(220f));
             foreach (string state in _controller.States) GUILayout.Label(state, GUILayout.Width(90f));
             EditorGUILayout.EndHorizontal();
             foreach (EasyUIElement element in elements)
@@ -66,9 +72,15 @@ namespace EasyFramework.Editor.UI
                     Selection.activeObject = element;
                 foreach (string state in _controller.States)
                 {
-                    UIStateVariant variant = element.Variants.FirstOrDefault(item => item != null && item.State == state);
-                    string value = variant == null ? "—" : ShortProperties(variant.Properties);
-                    GUILayout.Label(value, GUILayout.Width(90f));
+                    UIStateVariant variant = element.FindVariant(state);
+                    string value = variant == null || variant.Properties == UIStateProperty.None
+                        ? "默认"
+                        : ShortProperties(variant.Properties);
+                    if (GUILayout.Button(value, EditorStyles.miniLabel, GUILayout.Width(90f)))
+                    {
+                        Selection.activeObject = element;
+                        ApplyState(state);
+                    }
                 }
                 EditorGUILayout.EndHorizontal();
             }
@@ -77,9 +89,41 @@ namespace EasyFramework.Editor.UI
                 EasyUIValidator.ValidateAndReport(_controller.GetComponentInParent<EasyUIDisplay>());
         }
 
+        private void DrawStateBar()
+        {
+            EditorGUILayout.BeginHorizontal();
+            GUILayout.Label("状态", GUILayout.Width(40f));
+            foreach (string state in _controller.States)
+            {
+                bool selected = _controller.SelectedState == state;
+                if (GUILayout.Toggle(selected, state, EditorStyles.miniButton) && !selected)
+                    ApplyState(state);
+            }
+            EditorGUILayout.EndHorizontal();
+            EditorGUILayout.HelpBox(
+                $"当前状态：{_controller.SelectedState}。点状态名立即应用到子节点，再改外观并记录。",
+                MessageType.None);
+        }
+
+        private void ApplyState(string state)
+        {
+            Undo.RecordObjects(_controller.GetComponentsInChildren<Component>(true), "Apply Easy UI state");
+            _controller.SetState(state);
+            SceneView.RepaintAll();
+        }
+
+        private void RecordCurrent()
+        {
+            Undo.RecordObjects(_controller.GetComponentsInChildren<EasyUIElement>(true), "Capture Easy UI state");
+            _controller.CaptureCurrentToSelectedState();
+            EditorUtility.SetDirty(_controller);
+            foreach (EasyUIElement element in _controller.GetComponentsInChildren<EasyUIElement>(true))
+                EditorUtility.SetDirty(element);
+        }
+
         private static string ShortProperties(UIStateProperty properties)
         {
-            if (properties == UIStateProperty.None) return "Empty";
+            if (properties == UIStateProperty.None) return "默认";
             return properties.ToString().Replace("Interactable", "Interact").Replace("SpriteIndex", "Index");
         }
 

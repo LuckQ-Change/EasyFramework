@@ -23,15 +23,28 @@ namespace EasyFramework.UI
                 if (_controller == null) _controller = GetComponentInParent<EasyUIStateController>(true);
                 return _controller;
             }
-            set => _controller = value;
+            set
+            {
+                _controller = value;
+                SyncVariantsToController();
+            }
         }
 
+        public UIStateVariant DefaultValue => _defaultValue;
         public IReadOnlyList<UIStateVariant> Variants => _variants;
+
+        public bool BelongsTo(EasyUIStateController controller)
+        {
+            if (controller == null) return false;
+            if (_controller != null) return _controller == controller;
+            return GetComponentInParent<EasyUIStateController>(true) == controller;
+        }
 
         private void Reset()
         {
             _controller = GetComponentInParent<EasyUIStateController>(true);
             CaptureDefault();
+            SyncVariantsToController();
         }
 
         private void Awake()
@@ -41,77 +54,138 @@ namespace EasyFramework.UI
 
         private void OnEnable()
         {
+            SyncVariantsToController();
             var controller = Controller;
             if (controller != null) ApplyState(controller.SelectedState);
         }
 
         public void CaptureDefault()
         {
-            var properties = UIStateProperty.Active;
+            CaptureInto(_defaultValue);
             _defaultValue.SetState("Default");
-            _defaultValue.SetActive(gameObject.activeSelf);
+        }
+
+        public bool CaptureVariant(string state)
+        {
+            if (string.IsNullOrWhiteSpace(state)) return false;
+            UIStateVariant variant = GetOrCreateVariant(state);
+            CaptureInto(variant);
+            variant.SetState(state);
+            return true;
+        }
+
+        public UIStateVariant FindVariant(string state)
+        {
+            if (string.IsNullOrWhiteSpace(state)) return null;
+            for (int i = 0; i < _variants.Count; i++)
+            {
+                UIStateVariant variant = _variants[i];
+                if (variant != null && variant.State == state) return variant;
+            }
+            return null;
+        }
+
+        public void SyncVariantsToController()
+        {
+            var controller = Controller;
+            if (controller == null) return;
+
+            IReadOnlyList<string> states = controller.States;
+            var next = new List<UIStateVariant>(states.Count);
+            for (int s = 0; s < states.Count; s++)
+            {
+                string state = states[s];
+                if (string.IsNullOrWhiteSpace(state)) continue;
+                UIStateVariant match = FindVariant(state);
+                next.Add(match ?? new UIStateVariant(state));
+            }
+
+            if (controller.AllowUndefinedState)
+            {
+                for (int i = 0; i < _variants.Count; i++)
+                {
+                    UIStateVariant variant = _variants[i];
+                    if (variant == null || string.IsNullOrWhiteSpace(variant.State)) continue;
+                    if (FindInList(next, variant.State) == null) next.Add(variant);
+                }
+            }
+
+            if (AreSameVariants(_variants, next)) return;
+            _variants.Clear();
+            _variants.AddRange(next);
+        }
+
+        public void ApplyState(string state)
+        {
+            Apply(_defaultValue);
+            UIStateVariant variant = FindVariant(state);
+            if (variant != null) Apply(variant);
+        }
+
+        public void ApplyDefaultOnly() => Apply(_defaultValue);
+
+        public void ReplaceVariants(IEnumerable<UIStateVariant> variants)
+        {
+            _variants.Clear();
+            if (variants != null) _variants.AddRange(variants);
+            SyncVariantsToController();
+            var controller = Controller;
+            if (controller != null) ApplyState(controller.SelectedState);
+        }
+
+        private UIStateVariant GetOrCreateVariant(string state)
+        {
+            UIStateVariant variant = FindVariant(state);
+            if (variant != null) return variant;
+            variant = new UIStateVariant(state);
+            _variants.Add(variant);
+            return variant;
+        }
+
+        private void CaptureInto(UIStateVariant target)
+        {
+            var properties = UIStateProperty.Active;
+            target.SetActive(gameObject.activeSelf);
 
             if (TryGetComponent<Selectable>(out var selectable))
             {
                 properties |= UIStateProperty.Interactable;
-                _defaultValue.SetInteractable(selectable.interactable);
+                target.SetInteractable(selectable.interactable);
             }
             if (TryGetComponent<Graphic>(out var graphic))
             {
                 properties |= UIStateProperty.Color;
-                _defaultValue.SetColor(graphic.color);
+                target.SetColor(graphic.color);
             }
             if (TryGetComponent<CanvasGroup>(out var canvasGroup))
             {
                 properties |= UIStateProperty.Alpha;
-                _defaultValue.SetAlpha(canvasGroup.alpha);
+                target.SetAlpha(canvasGroup.alpha);
             }
             if (TryGetComponent<Image>(out var image))
             {
                 properties |= UIStateProperty.Sprite;
-                _defaultValue.SetSprite(image.sprite);
+                target.SetSprite(image.sprite);
             }
             if (TryGetComponent<EasyImage>(out var easyImage) && easyImage.SpriteIndex >= 0)
             {
                 properties |= UIStateProperty.SpriteIndex;
-                _defaultValue.SetSpriteIndex(easyImage.SpriteIndex);
+                target.SetSpriteIndex(easyImage.SpriteIndex);
             }
             foreach (Component component in GetComponents<Component>())
             {
                 if (!UIComponentAdapter.TryGetText(component, out string text)) continue;
                 properties |= UIStateProperty.Text;
-                _defaultValue.SetText(text);
+                target.SetText(text);
                 break;
             }
 
             if (TryReadValue(out var value))
             {
                 properties |= UIStateProperty.Value;
-                _defaultValue.SetValue(value);
+                target.SetValue(value);
             }
-            _defaultValue.SetProperties(properties);
-        }
-
-        public void ApplyState(string state)
-        {
-            Apply(_defaultValue);
-            for (int i = 0; i < _variants.Count; i++)
-            {
-                var variant = _variants[i];
-                if (variant != null && variant.State == state)
-                {
-                    Apply(variant);
-                    break;
-                }
-            }
-        }
-
-        public void ReplaceVariants(IEnumerable<UIStateVariant> variants)
-        {
-            _variants.Clear();
-            if (variants != null) _variants.AddRange(variants);
-            var controller = Controller;
-            if (controller != null) ApplyState(controller.SelectedState);
+            target.SetProperties(properties);
         }
 
         private void Apply(UIStateVariant variant)
@@ -162,6 +236,28 @@ namespace EasyFramework.UI
                 if (UIComponentAdapter.TrySetDropdownValue(component, Mathf.RoundToInt(value))) return;
             if (TryGetComponent<Toggle>(out var toggle)) toggle.SetIsOnWithoutNotify(value > 0.5f);
             else if (TryGetComponent<Image>(out var image)) image.fillAmount = value;
+        }
+
+        private static UIStateVariant FindInList(List<UIStateVariant> variants, string state)
+        {
+            for (int i = 0; i < variants.Count; i++)
+            {
+                UIStateVariant variant = variants[i];
+                if (variant != null && variant.State == state) return variant;
+            }
+            return null;
+        }
+
+        private static bool AreSameVariants(List<UIStateVariant> current, List<UIStateVariant> next)
+        {
+            if (current.Count != next.Count) return false;
+            for (int i = 0; i < current.Count; i++)
+            {
+                UIStateVariant left = current[i];
+                UIStateVariant right = next[i];
+                if (left != right) return false;
+            }
+            return true;
         }
     }
 }
