@@ -58,6 +58,11 @@ namespace EasyFramework.Editor.UI
         };
 
         private static readonly Dictionary<Type, Type> ToUGUI = BuildReverseMap();
+        private static readonly HashSet<Type> HeaderSwitchTypes = new HashSet<Type>
+        {
+            typeof(Image),
+            typeof(EasyImage),
+        };
 
         static EasyUGUIComponentConverter()
         {
@@ -68,16 +73,29 @@ namespace EasyFramework.Editor.UI
         private static void DrawInspectorSwitch(UnityEditor.Editor editor)
         {
             if (editor == null || editor.targets.Length != 1 || !(editor.target is Component component)) return;
+            Type sourceType = component.GetType();
+            if (!HeaderSwitchTypes.Contains(sourceType)) return;
 
             Type targetType;
             string label;
-            if (ToEasy.TryGetValue(component.GetType(), out targetType))
-                label = "切换为 Easy UI 组件";
-            else if (ToUGUI.TryGetValue(component.GetType(), out targetType))
-                label = "还原为原生 UGUI 组件";
+            string hint;
+            if (ToEasy.TryGetValue(sourceType, out targetType))
+            {
+                label = "切换为 EasyImage（图集索引）";
+                hint = "仅 EasyImage 提供 Sprite 列表和状态机可用的 Sprite Index。普通 UGUI Image 可直接使用，不必切换。";
+            }
+            else if (ToUGUI.TryGetValue(sourceType, out targetType))
+            {
+                label = "还原为原生 Image";
+                hint = "还原后图集列表不会写回原生 Image。状态机组件如仍需要可继续留在节点上。";
+            }
             else
+            {
                 return;
+            }
 
+            EditorGUILayout.Space(2f);
+            EditorGUILayout.HelpBox(hint, MessageType.None);
             if (!GUILayout.Button(label, EditorStyles.miniButton)) return;
             Component capturedComponent = component;
             Type capturedType = targetType;
@@ -109,74 +127,114 @@ namespace EasyFramework.Editor.UI
         private static bool ValidateConvertToUGUI(MenuCommand command) =>
             command.context is Component component && ToUGUI.ContainsKey(component.GetType());
 
-        [MenuItem("Tools/EasyFramework/UI/切换选中的 UGUI 组件", false, 100)]
-        private static void ConvertSelected()
+        [MenuItem("Tools/EasyFramework/UI/切换选中层级 Image 为 EasyImage", false, 100)]
+        private static void ConvertSelectedImages()
         {
-            GetSelectionImpact(out int convertibleCount, out int referenceCount, false);
-            if (convertibleCount == 0)
-            {
-                EditorUtility.DisplayDialog("Easy UI", "当前选择中没有可切换的原生 UGUI 组件。", "确定");
-                return;
-            }
-            if (!EditorUtility.DisplayDialog(
-                    "Easy UI 替换确认",
-                    $"将替换 {convertibleCount} 个组件；当前已加载内容中发现 {referenceCount} 个引用。\n" +
-                    "建议先执行“扫描选中组件替换影响”查看明细。",
-                    "继续替换",
-                    "取消"))
-                return;
-
-            int converted = 0;
-            foreach (var selected in Selection.gameObjects)
-            {
-                if (selected == null) continue;
-                var components = selected.GetComponents<Component>();
-                foreach (var component in components)
-                {
-                    if (component == null || !ToEasy.TryGetValue(component.GetType(), out var targetType)) continue;
-                    if (Replace(component, targetType)) converted++;
-                }
-            }
-            if (converted == 0) EditorUtility.DisplayDialog("Easy UI", "当前选择中没有可切换的原生 UGUI 组件。", "确定");
+            ConvertSelection(true);
         }
 
-        [MenuItem("Tools/EasyFramework/UI/扫描选中组件替换影响", false, 99)]
+        [MenuItem("Tools/EasyFramework/UI/还原选中层级 EasyImage 为 Image", false, 101)]
+        private static void ConvertSelectedEasyImages()
+        {
+            ConvertSelection(false);
+        }
+
+        [MenuItem("Tools/EasyFramework/UI/扫描选中层级 Image 替换影响", false, 99)]
         private static void ScanSelectedImpact()
         {
-            GetSelectionImpact(out int convertibleCount, out int referenceCount, true);
+            GetSelectionImpact(true, out int convertibleCount, out int referenceCount, true);
             EditorUtility.DisplayDialog(
                 "Easy UI 替换影响",
-                $"可替换组件：{convertibleCount}\n" +
+                $"可替换 Image：{convertibleCount}\n" +
                 $"已加载场景 / 当前 Prefab 上下文引用：{referenceCount}\n\n" +
                 "引用明细已输出到 Console。未加载的 Prefab 不在本报告范围内。",
                 "确定");
         }
 
+        private static void ConvertSelection(bool toEasy)
+        {
+            GetSelectionImpact(toEasy, out int convertibleCount, out int referenceCount, false);
+            if (convertibleCount == 0)
+            {
+                EditorUtility.DisplayDialog(
+                    "Easy UI",
+                    toEasy ? "当前选择层级中没有可切换的 Image。" : "当前选择层级中没有可还原的 EasyImage。",
+                    "确定");
+                return;
+            }
+
+            string sourceName = toEasy ? "Image" : "EasyImage";
+            string targetName = toEasy ? "EasyImage" : "Image";
+            if (!EditorUtility.DisplayDialog(
+                    "Easy UI 替换确认",
+                    $"将把选中层级中的 {convertibleCount} 个 {sourceName} 替换为 {targetName}。\n" +
+                    $"当前已加载内容中发现 {referenceCount} 个引用。\n" +
+                    "状态机（EasyUIElement）不会随组件切换自动增删。",
+                    "继续替换",
+                    "取消"))
+                return;
+
+            var map = toEasy ? ToEasy : ToUGUI;
+            int converted = 0;
+            foreach (Component component in CollectSelection(toEasy))
+            {
+                if (component == null || !map.TryGetValue(component.GetType(), out var targetType)) continue;
+                if (Replace(component, targetType)) converted++;
+            }
+            if (converted == 0)
+            {
+                EditorUtility.DisplayDialog(
+                    "Easy UI",
+                    toEasy ? "当前选择层级中没有可切换的 Image。" : "当前选择层级中没有可还原的 EasyImage。",
+                    "确定");
+            }
+        }
+
         private static void GetSelectionImpact(
+            bool toEasy,
             out int convertibleCount,
             out int referenceCount,
             bool logDetails)
         {
             convertibleCount = 0;
             referenceCount = 0;
+            foreach (Component component in CollectSelection(toEasy))
+            {
+                convertibleCount++;
+                List<ReferenceRecord> references = CaptureReferences(component);
+                referenceCount += references.Count;
+                if (!logDetails) continue;
+                Debug.Log(
+                    $"[Easy UI Impact] {GetHierarchyPath(component.transform)} / {component.GetType().Name}: " +
+                    $"{references.Count} references",
+                    component);
+                foreach (ReferenceRecord reference in references)
+                    Debug.Log($"  {reference.Owner.name}.{reference.PropertyPath}", reference.Owner);
+            }
+        }
+
+        private static List<Component> CollectSelection(bool toEasy)
+        {
+            var result = new List<Component>();
+            var seen = new HashSet<Component>();
             foreach (GameObject selected in Selection.gameObjects)
             {
                 if (selected == null) continue;
-                foreach (Component component in selected.GetComponents<Component>())
+                foreach (Component component in selected.GetComponentsInChildren<Component>(true))
                 {
-                    if (component == null || !ToEasy.ContainsKey(component.GetType())) continue;
-                    convertibleCount++;
-                    List<ReferenceRecord> references = CaptureReferences(component);
-                    referenceCount += references.Count;
-                    if (!logDetails) continue;
-                    Debug.Log(
-                        $"[Easy UI Impact] {GetHierarchyPath(component.transform)} / {component.GetType().Name}: " +
-                        $"{references.Count} references",
-                        component);
-                    foreach (ReferenceRecord reference in references)
-                        Debug.Log($"  {reference.Owner.name}.{reference.PropertyPath}", reference.Owner);
+                    if (component == null || !seen.Add(component)) continue;
+                    Type type = component.GetType();
+                    if (toEasy)
+                    {
+                        if (type == typeof(Image)) result.Add(component);
+                    }
+                    else if (type == typeof(EasyImage))
+                    {
+                        result.Add(component);
+                    }
                 }
             }
+            return result;
         }
 
         private static string GetHierarchyPath(Transform target)

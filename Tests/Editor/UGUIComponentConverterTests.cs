@@ -37,6 +37,9 @@ namespace EasyFramework.Tests
                 Assert.IsNotNull(easyImage);
                 Assert.AreEqual(typeof(EasyImage), gameObject.GetComponent<Image>().GetType());
                 Assert.AreSame(easyImage, button.targetGraphic);
+                Assert.IsNull(
+                    gameObject.GetComponent<EasyUIElement>(),
+                    "Switching Image to EasyImage must not attach a state machine component.");
             }
             finally
             {

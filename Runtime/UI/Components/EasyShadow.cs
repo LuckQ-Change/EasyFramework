@@ -3,6 +3,6 @@ using UnityEngine.UI;
 
 namespace EasyFramework.UI
 {
-    [AddComponentMenu("EasyFramework/UI/Shadow"), RequireComponent(typeof(EasyUIElement))]
+    [AddComponentMenu("EasyFramework/UI/Shadow")]
     public class EasyShadow : Shadow, IEasyUIComponent { }
 }

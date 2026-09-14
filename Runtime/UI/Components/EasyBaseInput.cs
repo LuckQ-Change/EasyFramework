@@ -3,6 +3,6 @@ using UnityEngine.EventSystems;
 
 namespace EasyFramework.UI
 {
-    [AddComponentMenu("EasyFramework/Event System/Base Input"), RequireComponent(typeof(EasyUIElement))]
+    [AddComponentMenu("EasyFramework/Event System/Base Input")]
     public class EasyBaseInput : BaseInput, IEasyUIComponent { }
 }

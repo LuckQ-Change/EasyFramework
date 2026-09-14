@@ -4,6 +4,10 @@
 
 ### Changed
 
+- Easy UI 组件不再强制挂 `EasyUIElement`。原生 UGUI 可直接参与状态机，只有需要图集索引时才把 Image 换成 EasyImage。
+- Image 与 EasyImage 的切换改为按层级处理，并保留已加载引用；不再在每种 UGUI 组件标题栏上推动整表替换。
+- UI 状态机的当前状态会立刻应用到子节点；状态列表支持任意多个自定义名称，改名时保留已记录的变体。保存 Prefab 时仍先写入默认外观。
+
 - 移除框架程序集中的具体业务流程与流程专用启动配置，项目流程现在可直接引用项目 UI 和脚本。
 - 启动配置支持在 Inspector 中选择项目的首流程脚本，并由 Launcher 自动注册和启动。
 - `StartAsync`、`ChangeAsync` 和 `Next` 支持按需自动注册具有公开无参构造函数的流程。

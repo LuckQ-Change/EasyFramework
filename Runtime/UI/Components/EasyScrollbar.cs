@@ -3,6 +3,6 @@ using UnityEngine.UI;
 
 namespace EasyFramework.UI
 {
-    [AddComponentMenu("EasyFramework/UI/Scrollbar"), RequireComponent(typeof(EasyUIElement))]
+    [AddComponentMenu("EasyFramework/UI/Scrollbar")]
     public class EasyScrollbar : Scrollbar, IEasyUIComponent { }
 }

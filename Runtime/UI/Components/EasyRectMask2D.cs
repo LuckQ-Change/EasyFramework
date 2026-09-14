@@ -3,6 +3,6 @@ using UnityEngine.UI;
 
 namespace EasyFramework.UI
 {
-    [AddComponentMenu("EasyFramework/UI/Rect Mask 2D"), RequireComponent(typeof(EasyUIElement))]
+    [AddComponentMenu("EasyFramework/UI/Rect Mask 2D")]
     public class EasyRectMask2D : RectMask2D, IEasyUIComponent { }
 }

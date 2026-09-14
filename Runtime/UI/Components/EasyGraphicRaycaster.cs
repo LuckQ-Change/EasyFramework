@@ -3,6 +3,6 @@ using UnityEngine.UI;
 
 namespace EasyFramework.UI
 {
-    [AddComponentMenu("EasyFramework/UI/Graphic Raycaster"), RequireComponent(typeof(EasyUIElement))]
+    [AddComponentMenu("EasyFramework/UI/Graphic Raycaster")]
     public class EasyGraphicRaycaster : GraphicRaycaster, IEasyUIComponent { }
 }

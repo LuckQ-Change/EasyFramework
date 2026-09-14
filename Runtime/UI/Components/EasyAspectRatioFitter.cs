@@ -3,6 +3,6 @@ using UnityEngine.UI;
 
 namespace EasyFramework.UI
 {
-    [AddComponentMenu("EasyFramework/UI/Aspect Ratio Fitter"), RequireComponent(typeof(EasyUIElement))]
+    [AddComponentMenu("EasyFramework/UI/Aspect Ratio Fitter")]
     public class EasyAspectRatioFitter : AspectRatioFitter, IEasyUIComponent { }
 }

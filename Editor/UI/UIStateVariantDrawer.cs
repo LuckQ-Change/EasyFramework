@@ -23,7 +23,8 @@ namespace EasyFramework.Editor.UI
         public override float GetPropertyHeight(SerializedProperty property, GUIContent label)
         {
             if (!property.isExpanded) return EditorGUIUtility.singleLineHeight;
-            int rows = 2 + CountProperties(GetSupportedProperties(property));
+            bool isDefault = property.name == "_defaultValue";
+            int rows = (isDefault ? 1 : 2) + CountProperties(GetSupportedProperties(property));
             return rows * EditorGUIUtility.singleLineHeight + (rows - 1) * EditorGUIUtility.standardVerticalSpacing;
         }
 
@@ -33,9 +34,12 @@ namespace EasyFramework.Editor.UI
             float lineHeight = EditorGUIUtility.singleLineHeight;
             float spacing = EditorGUIUtility.standardVerticalSpacing;
             var line = new Rect(position.x, position.y, position.width, lineHeight);
+            bool isDefault = property.name == "_defaultValue";
 
             var state = property.FindPropertyRelative("_state");
-            string title = string.IsNullOrWhiteSpace(state.stringValue) ? label.text : state.stringValue;
+            string title = isDefault
+                ? "默认外观"
+                : (string.IsNullOrWhiteSpace(state.stringValue) ? label.text : state.stringValue);
             property.isExpanded = EditorGUI.Foldout(line, property.isExpanded, title, true);
             if (!property.isExpanded)
             {
@@ -44,8 +48,11 @@ namespace EasyFramework.Editor.UI
             }
 
             EditorGUI.indentLevel++;
-            line.y += lineHeight + spacing;
-            DrawStatePopup(line, property, state);
+            if (!isDefault)
+            {
+                line.y += lineHeight + spacing;
+                DrawStatePopup(line, property, state);
+            }
 
             UIStateProperty supported = GetSupportedProperties(property);
             foreach (UIStateProperty stateProperty in OrderedProperties)
@@ -93,16 +100,24 @@ namespace EasyFramework.Editor.UI
                 EditorGUI.PropertyField(rect, state, new GUIContent("State"));
                 return;
             }
+
+            EditorGUI.BeginChangeCheck();
             var states = element.Controller.States;
             var labels = new string[states.Count];
-            int selected = 0;
+            int selected = -1;
             for (int i = 0; i < states.Count; i++)
             {
                 labels[i] = states[i];
                 if (states[i] == state.stringValue) selected = i;
             }
+            if (selected < 0)
+            {
+                EditorGUI.LabelField(rect, "State", state.stringValue);
+                return;
+            }
             selected = EditorGUI.Popup(rect, "State", selected, labels);
-            state.stringValue = states[Mathf.Clamp(selected, 0, states.Count - 1)];
+            if (EditorGUI.EndChangeCheck())
+                state.stringValue = states[Mathf.Clamp(selected, 0, states.Count - 1)];
         }
 
         private static UIStateProperty GetSupportedProperties(SerializedProperty property)

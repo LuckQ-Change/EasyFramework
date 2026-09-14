@@ -3,6 +3,6 @@ using UnityEngine.EventSystems;
 
 namespace EasyFramework.UI
 {
-    [AddComponentMenu("EasyFramework/Event System/Event System"), RequireComponent(typeof(EasyUIElement))]
+    [AddComponentMenu("EasyFramework/Event System/Event System")]
     public class EasyEventSystem : EventSystem, IEasyUIComponent { }
 }

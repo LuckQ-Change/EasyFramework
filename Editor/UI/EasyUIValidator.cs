@@ -80,7 +80,7 @@ namespace EasyFramework.Editor.UI
             {
                 foreach (EasyUIElement element in controller.GetComponentsInChildren<EasyUIElement>(true))
                 {
-                    if (element.Controller != controller) continue;
+                    if (element.BelongsTo(controller) == false) continue;
                     foreach (UIStateVariant variant in element.Variants)
                         if (variant != null && !controller.States.Contains(variant.State))
                             problems.Add($"{element.name} 引用了未定义状态：{variant.State}。");

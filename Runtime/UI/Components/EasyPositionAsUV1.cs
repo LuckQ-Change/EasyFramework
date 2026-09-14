@@ -3,6 +3,6 @@ using UnityEngine.UI;
 
 namespace EasyFramework.UI
 {
-    [AddComponentMenu("EasyFramework/UI/Position As UV1"), RequireComponent(typeof(EasyUIElement))]
+    [AddComponentMenu("EasyFramework/UI/Position As UV1")]
     public class EasyPositionAsUV1 : PositionAsUV1, IEasyUIComponent { }
 }

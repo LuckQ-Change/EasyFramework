@@ -4,7 +4,7 @@ using UnityEngine.UI;
 
 namespace EasyFramework.UI
 {
-    [AddComponentMenu("EasyFramework/UI/Image"), RequireComponent(typeof(EasyUIElement))]
+    [AddComponentMenu("EasyFramework/UI/Image")]
     public class EasyImage : Image, IEasyUIComponent
     {
         [SerializeField] private List<Sprite> _sprites = new List<Sprite>();

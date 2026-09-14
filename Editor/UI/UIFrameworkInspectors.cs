@@ -1,6 +1,8 @@
 using System;
+using System.Collections.Generic;
 using EasyFramework.UI;
 using UnityEditor;
+using UnityEditorInternal;
 using UnityEngine;
 
 namespace EasyFramework.Editor.UI
@@ -177,18 +179,144 @@ namespace EasyFramework.Editor.UI
     [CustomEditor(typeof(EasyUIStateController))]
     internal sealed class EasyUIStateControllerInspector : UnityEditor.Editor
     {
+        private SerializedProperty _states;
+        private SerializedProperty _selectedIndex;
+        private SerializedProperty _allowUndefinedState;
+        private SerializedProperty _onStateChanged;
+        private ReorderableList _stateList;
+        private string[] _previousStates;
+
+        private void OnEnable()
+        {
+            _states = serializedObject.FindProperty("_states");
+            _selectedIndex = serializedObject.FindProperty("_selectedIndex");
+            _allowUndefinedState = serializedObject.FindProperty("_allowUndefinedState");
+            _onStateChanged = serializedObject.FindProperty("_onStateChanged");
+            _stateList = new ReorderableList(serializedObject, _states, true, true, true, true)
+            {
+                drawHeaderCallback = rect => EditorGUI.LabelField(rect, "状态列表"),
+                drawElementCallback = DrawStateElement,
+                onAddCallback = AddStateElement
+            };
+            CacheStates((EasyUIStateController)target);
+        }
+
         public override void OnInspectorGUI()
         {
-            DrawDefaultInspector();
-            EditorGUILayout.Space();
-            if (GUILayout.Button("预览当前状态"))
+            var controller = (EasyUIStateController)target;
+            serializedObject.Update();
+            _stateList.DoLayoutList();
+            var labels = BuildStateLabels();
+            if (labels.Length > 0)
             {
-                var controller = (EasyUIStateController)target;
-                Undo.RecordObjects(controller.GetComponentsInChildren<Component>(true), "Preview Easy UI state");
-                controller.Refresh();
+                EditorGUI.BeginChangeCheck();
+                int next = EditorGUILayout.Popup("当前状态", _selectedIndex.intValue, labels);
+                if (EditorGUI.EndChangeCheck())
+                    _selectedIndex.intValue = next;
             }
+            EditorGUILayout.PropertyField(_allowUndefinedState, new GUIContent("允许未定义状态"));
+            EditorGUILayout.PropertyField(_onStateChanged, new GUIContent("状态变化事件"));
+            bool statesChanged = serializedObject.ApplyModifiedProperties();
+            if (statesChanged)
+            {
+                controller.RelinkStates(_previousStates);
+                CacheStates(controller);
+            }
+
+            EditorGUILayout.Space();
+            EditorGUILayout.LabelField("应用到子节点", EditorStyles.boldLabel);
+            EditorGUILayout.BeginHorizontal();
+            foreach (string state in controller.States)
+            {
+                if (string.IsNullOrWhiteSpace(state)) continue;
+                bool selected = controller.SelectedState == state;
+                if (GUILayout.Toggle(selected, state, EditorStyles.miniButton) && !selected)
+                    ApplyState(controller, state);
+            }
+            EditorGUILayout.EndHorizontal();
+            if (statesChanged)
+                ApplyState(controller, controller.SelectedState);
+
+            EditorGUILayout.BeginHorizontal();
+            if (GUILayout.Button("将当前外观记录到当前状态"))
+            {
+                Undo.RecordObjects(controller.GetComponentsInChildren<EasyUIElement>(true), "Capture Easy UI state");
+                controller.CaptureCurrentToSelectedState();
+                EditorUtility.SetDirty(controller);
+            }
+            if (GUILayout.Button("还原默认外观"))
+            {
+                Undo.RecordObjects(controller.GetComponentsInChildren<Component>(true), "Restore Easy UI default");
+                controller.RestoreSerializedAppearance();
+                SceneView.RepaintAll();
+            }
+            EditorGUILayout.EndHorizontal();
+            EditorGUILayout.HelpBox(
+                "点状态名会立刻改子节点外观。可添加任意多个自定义状态；改名会保留已记录的变体。保存 Prefab 时写入默认外观，随后仍会回到当前状态。",
+                MessageType.Info);
             if (GUILayout.Button("打开集中状态工作台"))
-                EasyUIStateWorkbench.Open((EasyUIStateController)target);
+                EasyUIStateWorkbench.Open(controller);
+        }
+
+        private void DrawStateElement(Rect rect, int index, bool active, bool focused)
+        {
+            if (index < 0 || index >= _states.arraySize) return;
+            SerializedProperty element = _states.GetArrayElementAtIndex(index);
+            rect.y += 2f;
+            rect.height = EditorGUIUtility.singleLineHeight;
+            EditorGUI.PropertyField(rect, element, GUIContent.none);
+        }
+
+        private void AddStateElement(ReorderableList list)
+        {
+            int index = _states.arraySize;
+            _states.arraySize++;
+            _states.GetArrayElementAtIndex(index).stringValue = UniqueStateName(index);
+        }
+
+        private string UniqueStateName(int ignoreIndex)
+        {
+            var used = new HashSet<string>();
+            for (int i = 0; i < _states.arraySize; i++)
+            {
+                if (i == ignoreIndex) continue;
+                used.Add(_states.GetArrayElementAtIndex(i).stringValue);
+            }
+            if (!used.Contains("State")) return "State";
+            int suffix = 2;
+            while (used.Contains("State" + suffix)) suffix++;
+            return "State" + suffix;
+        }
+
+        private string[] BuildStateLabels()
+        {
+            var labels = new string[_states.arraySize];
+            for (int i = 0; i < labels.Length; i++)
+            {
+                string value = _states.GetArrayElementAtIndex(i).stringValue;
+                labels[i] = string.IsNullOrWhiteSpace(value) ? $"(State {i + 1})" : value;
+            }
+            return labels;
+        }
+
+        private void CacheStates(EasyUIStateController controller)
+        {
+            if (controller == null)
+            {
+                _previousStates = Array.Empty<string>();
+                return;
+            }
+            _previousStates = new string[controller.States.Count];
+            for (int i = 0; i < _previousStates.Length; i++)
+                _previousStates[i] = controller.States[i];
+        }
+
+        private static void ApplyState(EasyUIStateController controller, string state)
+        {
+            if (controller == null || string.IsNullOrWhiteSpace(state)) return;
+            Undo.RecordObjects(controller.GetComponentsInChildren<Component>(true), "Apply Easy UI state");
+            controller.SetState(state);
+            SceneView.RepaintAll();
         }
     }
 
@@ -197,35 +325,72 @@ namespace EasyFramework.Editor.UI
     {
         private SerializedProperty _controller;
         private SerializedProperty _captureDefaultOnAwake;
+        private SerializedProperty _defaultValue;
         private SerializedProperty _variants;
 
         private void OnEnable()
         {
             _controller = serializedObject.FindProperty("_controller");
             _captureDefaultOnAwake = serializedObject.FindProperty("_captureDefaultOnAwake");
+            _defaultValue = serializedObject.FindProperty("_defaultValue");
             _variants = serializedObject.FindProperty("_variants");
         }
 
         public override void OnInspectorGUI()
         {
+            var element = (EasyUIElement)target;
+            element.SyncVariantsToController();
             serializedObject.Update();
             EditorGUILayout.PropertyField(_controller);
-            EditorGUILayout.PropertyField(_captureDefaultOnAwake);
-            EditorGUILayout.PropertyField(_variants, true);
-            serializedObject.ApplyModifiedProperties();
-            EditorGUILayout.Space();
-            var element = (EasyUIElement)target;
-            if (GUILayout.Button("将当前组件属性记录为默认值"))
+            EditorGUILayout.PropertyField(_captureDefaultOnAwake, new GUIContent("Awake 时重录默认外观"));
+            EditorGUILayout.PropertyField(_defaultValue, true);
+            if (GUILayout.Button("将当前组件属性记录为默认外观"))
             {
                 Undo.RecordObject(element, "Capture Easy UI defaults");
                 element.CaptureDefault();
                 EditorUtility.SetDirty(element);
+                serializedObject.Update();
             }
-            if (GUILayout.Button("预览 Controller 当前状态"))
+
+            EditorGUILayout.Space();
+            EditorGUILayout.LabelField("状态变体", EditorStyles.boldLabel);
+            if (element.Controller == null)
             {
-                Undo.RecordObjects(element.GetComponents<Component>(), "Preview Easy UI element");
-                var controller = element.Controller;
-                if (controller != null) element.ApplyState(controller.SelectedState);
+                EditorGUILayout.HelpBox("指定 State Controller 后，会按状态列表自动生成变体。未勾选的属性沿用默认外观。", MessageType.Info);
+                EditorGUILayout.PropertyField(_variants, true);
+            }
+            else
+            {
+                EditorGUILayout.HelpBox("每个状态只填写相对默认外观要改的属性。可先预览该状态，改节点，再点记录。", MessageType.Info);
+                for (int i = 0; i < _variants.arraySize; i++)
+                {
+                    SerializedProperty variant = _variants.GetArrayElementAtIndex(i);
+                    EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+                    EditorGUILayout.PropertyField(variant, true);
+                    string state = variant.FindPropertyRelative("_state").stringValue;
+                    EditorGUILayout.BeginHorizontal();
+                    if (GUILayout.Button("预览此状态"))
+                    {
+                        Undo.RecordObjects(element.Controller.GetComponentsInChildren<Component>(true), "Apply Easy UI state");
+                        element.Controller.SetState(state);
+                        SceneView.RepaintAll();
+                    }
+                    if (GUILayout.Button("将当前外观记录到此状态"))
+                    {
+                        Undo.RecordObject(element, "Capture Easy UI variant");
+                        element.CaptureVariant(state);
+                        EditorUtility.SetDirty(element);
+                        serializedObject.Update();
+                    }
+                    EditorGUILayout.EndHorizontal();
+                    EditorGUILayout.EndVertical();
+                }
+            }
+
+            if (serializedObject.ApplyModifiedProperties() && element.Controller != null)
+            {
+                element.SyncVariantsToController();
+                element.ApplyState(element.Controller.SelectedState);
             }
         }
     }
