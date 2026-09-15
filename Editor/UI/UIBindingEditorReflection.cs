@@ -15,9 +15,15 @@ namespace EasyFramework.Editor.UI
             EasyUIDisplay display = context.GetComponentInParent<EasyUIDisplay>();
             string typeName = display == null ? null : display.ViewTypeName;
             if (string.IsNullOrWhiteSpace(typeName)) return null;
+
+            // Display 保存的是程序集限定名称。Assembly.GetType 只能接收不带程序集后缀的
+            // FullName，因此先走 Type.GetType，再为旧 Prefab 的非限定名称保留遍历回退。
+            Type resolved = Type.GetType(typeName, false);
+            if (resolved != null) return resolved;
+            string fullName = typeName.Split(',')[0].Trim();
             foreach (Assembly assembly in AppDomain.CurrentDomain.GetAssemblies())
             {
-                Type type = assembly.GetType(typeName, false);
+                Type type = assembly.GetType(fullName, false);
                 if (type != null) return type;
             }
             return null;

@@ -12,6 +12,8 @@ namespace EasyFramework.Tests
     public sealed class UIManagerTests
     {
         private sealed class TestView : EasyUIView { public TestView() { } }
+        [EasyUIPrefab("UI/Canonical")]
+        private sealed class AttributedView : EasyUIView { public AttributedView() { } }
         private sealed class StatefulView : EasyUIView<int>
         {
             public int OpenedWith { get; private set; }
@@ -82,6 +84,26 @@ namespace EasyFramework.Tests
             {
                 Object.DestroyImmediate(prefab.gameObject);
                 if (managerObject != null) Object.DestroyImmediate(managerObject);
+            }
+        }
+
+        [Test]
+        public void Display_PrefabLocation_UsesViewAttributeAsCanonicalSource()
+        {
+            var gameObject = new GameObject("Canonical", typeof(EasyUIDisplay));
+            try
+            {
+                EasyUIDisplay display = gameObject.GetComponent<EasyUIDisplay>();
+                display.SetViewScript(
+                    typeof(AttributedView).AssemblyQualifiedName,
+                    string.Empty,
+                    "UI/Stale");
+
+                Assert.AreEqual("UI/Canonical", display.PrefabLocation);
+            }
+            finally
+            {
+                Object.DestroyImmediate(gameObject);
             }
         }
 

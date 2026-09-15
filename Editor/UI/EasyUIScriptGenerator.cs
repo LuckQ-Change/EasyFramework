@@ -27,7 +27,8 @@ namespace EasyFramework.Editor.UI
                 throw new InvalidOperationException("Managed View 必须填写 Prefab Location。");
 
             string scriptPath = NormalizeAssetPath(scriptFolder) + "/" + className + ".cs";
-            if (!File.Exists(ToFullPath(scriptPath)))
+            bool createdScript = !File.Exists(ToFullPath(scriptPath));
+            if (createdScript)
             {
                 Directory.CreateDirectory(ToFullPath(Path.GetDirectoryName(scriptPath).Replace('\\', '/')));
                 File.WriteAllText(
@@ -45,8 +46,24 @@ namespace EasyFramework.Editor.UI
                 if (!typeof(EasyUIObject).IsAssignableFrom(scriptType))
                     throw new InvalidOperationException(
                         $"脚本类型“{scriptType.FullName}”必须继承 EasyUIObject。");
+                if (!string.Equals(scriptType.Name, className, StringComparison.Ordinal))
+                    throw new InvalidOperationException(
+                        $"现有脚本“{scriptPath}”声明的是 {scriptType.Name}，与目标类名 {className} 不一致。");
+                if (display.ManagedAsView)
+                {
+                    if (!EasyUIFactory.TryGetPrefabLocation(scriptType, out string registeredLocation))
+                        throw new InvalidOperationException(
+                            $"现有 View“{scriptType.FullName}”缺少 EasyUIPrefab 特性，无法确定唯一资源地址。");
+                    if (!string.Equals(registeredLocation, prefabLocation, StringComparison.Ordinal))
+                        throw new InvalidOperationException(
+                            $"现有 View 已注册资源地址“{registeredLocation}”。如需修改，请先修改脚本上的 EasyUIPrefab 特性。");
+                    prefabLocation = registeredLocation;
+                }
                 viewTypeName = $"{scriptType.FullName}, {scriptType.Assembly.GetName().Name}";
             }
+            else if (!createdScript)
+                throw new InvalidOperationException(
+                    $"现有脚本“{scriptPath}”尚未成功编译，暂时不能安全关联。请修复编译错误或等待 Unity 编译完成后重试。");
 
             Undo.RecordObject(display, "Generate Easy UI script");
             display.SetViewScript(

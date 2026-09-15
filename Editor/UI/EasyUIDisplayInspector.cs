@@ -11,10 +11,12 @@ namespace EasyFramework.Editor.UI
     {
         private SerializedProperty _viewTypeName;
         private SerializedProperty _viewScriptPath;
+        private SerializedProperty _prefabLocationProperty;
         private MonoScript _viewScript;
         private string _validationError;
         private bool _needsTypeSync;
         private bool _showGenerator;
+        private bool _showAdvancedConfiguration;
         private string _className;
         private string _namespaceName = EasyUIScriptGenerator.DefaultNamespace;
         private string _prefabLocation;
@@ -24,6 +26,7 @@ namespace EasyFramework.Editor.UI
         {
             _viewTypeName = serializedObject.FindProperty("_viewTypeName");
             _viewScriptPath = serializedObject.FindProperty("_viewScriptPath");
+            _prefabLocationProperty = serializedObject.FindProperty("_prefabLocation");
             RefreshSelectedScript();
 
             var display = (EasyUIDisplay)target;
@@ -41,12 +44,10 @@ namespace EasyFramework.Editor.UI
 
         public override void OnInspectorGUI()
         {
-            serializedObject.Update();
-            DrawPropertiesExcluding(serializedObject, "m_Script", "_viewTypeName", "_viewScriptPath", "_prefabLocation");
-            serializedObject.ApplyModifiedProperties();
-
             var display = (EasyUIDisplay)target;
-            EditorGUILayout.Space();
+            serializedObject.Update();
+            EditorGUILayout.LabelField("Easy UI Display", new GUIStyle(EditorStyles.boldLabel) { fontSize = 14 });
+            EditorGUILayout.Space(4f);
             EditorGUILayout.LabelField("View 类", EditorStyles.boldLabel);
             EditorGUI.BeginChangeCheck();
             MonoScript selected = (MonoScript)EditorGUILayout.ObjectField(
@@ -55,6 +56,15 @@ namespace EasyFramework.Editor.UI
                 typeof(MonoScript),
                 false);
             if (EditorGUI.EndChangeCheck()) ApplySelectedScript(selected);
+
+            if (_viewScript != null)
+            {
+                using (new EditorGUI.DisabledScope(true))
+                    EditorGUILayout.TextField("资源地址", display.PrefabLocation);
+                EditorGUILayout.LabelField(
+                    "资源地址来自 View 脚本上的 EasyUIPrefab 特性。",
+                    EditorStyles.wordWrappedMiniLabel);
+            }
 
             serializedObject.Update();
             EditorGUI.BeginChangeCheck();
@@ -72,6 +82,10 @@ namespace EasyFramework.Editor.UI
             else if (_viewScript == null)
                 EditorGUILayout.HelpBox("请选择一个继承 EasyUIObject 的业务脚本。", MessageType.Info);
 
+            EditorGUILayout.Space(6f);
+            DrawDisplaySettings();
+            serializedObject.ApplyModifiedProperties();
+
             _showGenerator = EditorGUILayout.Foldout(
                 _showGenerator,
                 "生成新的 View 脚本",
@@ -82,8 +96,8 @@ namespace EasyFramework.Editor.UI
                 _className = EditorGUILayout.TextField("类名", _className);
                 _namespaceName = EditorGUILayout.TextField("命名空间", _namespaceName);
                 _prefabLocation = EditorGUILayout.TextField("资源地址", _prefabLocation);
-                _scriptFolder = EditorGUILayout.TextField("脚本目录", _scriptFolder);
-                if (GUILayout.Button("生成并选择脚本"))
+                DrawFolderField("脚本目录", ref _scriptFolder);
+                if (GUILayout.Button("生成并选择脚本", GUILayout.Height(26f)))
                 {
                     try
                     {
@@ -103,8 +117,58 @@ namespace EasyFramework.Editor.UI
 
             if (GUILayout.Button("校验 Display")) EasyUIValidator.ValidateAndReport(display);
             EditorGUILayout.HelpBox(
-                "业务脚本由上方对象框直接选择；Prefab 只在运行时保存程序集限定类型名，不需要手动维护字符串。",
+                "业务脚本通过对象框选择；类型名和资源地址会从脚本自动同步，不需要手动维护内部字符串。",
                 MessageType.Info);
+        }
+
+        private void DrawDisplaySettings()
+        {
+            EditorGUILayout.LabelField("显示行为", EditorStyles.boldLabel);
+            EditorGUILayout.PropertyField(serializedObject.FindProperty("_managedAsView"), new GUIContent("受 UI Manager 管理"));
+            EditorGUILayout.PropertyField(serializedObject.FindProperty("_defaultLayer"), new GUIContent("默认层级"));
+            EditorGUILayout.PropertyField(serializedObject.FindProperty("_singleInstance"), new GUIContent("单例界面"));
+            EditorGUILayout.PropertyField(serializedObject.FindProperty("_closeOnBack"), new GUIContent("响应返回关闭"));
+            EditorGUILayout.PropertyField(serializedObject.FindProperty("_stretchToLayer"), new GUIContent("拉伸到层级尺寸"));
+
+            EditorGUILayout.Space(4f);
+            EditorGUILayout.LabelField("共享背景", EditorStyles.boldLabel);
+            SerializedProperty backgroundMode = serializedObject.FindProperty("_backgroundMode");
+            EditorGUILayout.PropertyField(backgroundMode, new GUIContent("背景模式"));
+            if (backgroundMode.enumValueIndex != 0)
+            {
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("_closeOnBackground"), new GUIContent("点击背景关闭"));
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("_backgroundColor"), new GUIContent("背景颜色"));
+            }
+
+            _showAdvancedConfiguration = EditorGUILayout.Foldout(
+                _showAdvancedConfiguration,
+                "高级配置",
+                true);
+            if (!_showAdvancedConfiguration) return;
+            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+            {
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("_viewId"), new GUIContent("View Id（可选）"));
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("_createOnAwake"), new GUIContent("Awake 时创建 Logic"));
+            }
+        }
+
+        private static void DrawFolderField(string label, ref string value)
+        {
+            EditorGUILayout.BeginHorizontal();
+            value = EditorGUILayout.TextField(label, value);
+            if (GUILayout.Button("选择…", GUILayout.Width(64f)))
+            {
+                string absolute = EditorUtility.OpenFolderPanel(label, Application.dataPath, string.Empty);
+                if (!string.IsNullOrWhiteSpace(absolute))
+                {
+                    string relative = FileUtil.GetProjectRelativePath(absolute);
+                    if (string.IsNullOrWhiteSpace(relative))
+                        EditorUtility.DisplayDialog("Easy UI", "目录必须位于当前项目的 Assets 下。", "确定");
+                    else
+                        value = relative.TrimEnd('/', '\\');
+                }
+            }
+            EditorGUILayout.EndHorizontal();
         }
 
         private void ApplySelectedScript(MonoScript script)
@@ -130,6 +194,11 @@ namespace EasyFramework.Editor.UI
             _viewScript = script;
             _viewTypeName.stringValue = GetStoredTypeName(type);
             _viewScriptPath.stringValue = AssetDatabase.GetAssetPath(script);
+            if (EasyUIFactory.TryGetPrefabLocation(type, out string prefabLocation))
+            {
+                _prefabLocationProperty.stringValue = prefabLocation;
+                _prefabLocation = prefabLocation;
+            }
             serializedObject.ApplyModifiedProperties();
             EditorUtility.SetDirty(target);
             PrefabUtility.RecordPrefabInstancePropertyModifications(target);

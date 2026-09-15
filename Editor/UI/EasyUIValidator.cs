@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using EasyFramework.UI;
@@ -43,6 +44,9 @@ namespace EasyFramework.Editor.UI
                     problems.Add($"记录的类型“{viewType.FullName}”没有继承 EasyUIObject。");
                 else if (display.ManagedAsView && !typeof(EasyUIView).IsAssignableFrom(viewType))
                     problems.Add($"记录的类型“{viewType.FullName}”没有继承 EasyUIView。");
+                else if (display.ManagedAsView &&
+                         !EasyUIFactory.TryGetPrefabLocation(viewType, out _))
+                    problems.Add($"View“{viewType.FullName}”缺少 EasyUIPrefab 资源地址特性。");
             }
             if (display.ManagedAsView && string.IsNullOrWhiteSpace(display.PrefabLocation))
                 problems.Add("View 缺少 Prefab Location。");
@@ -60,6 +64,9 @@ namespace EasyFramework.Editor.UI
                     if (binding != null && sourceType != null &&
                         !UIBindingEditorReflection.HasBindableMember(sourceType, binding.SourceKey))
                         problems.Add($"业务数据源中不存在响应属性：{binding.SourceKey}。");
+                    if (binding != null && binding.TargetProperty == UIBindingProperty.Text &&
+                        !IsValidFormat(binding.Format))
+                        problems.Add($"响应绑定“{binding.SourceKey}”的 Format 格式无效。");
                 }
             }
 
@@ -87,6 +94,20 @@ namespace EasyFramework.Editor.UI
                 }
             }
             return problems;
+        }
+
+        private static bool IsValidFormat(string format)
+        {
+            if (string.IsNullOrEmpty(format)) return true;
+            try
+            {
+                string.Format(CultureInfo.InvariantCulture, format, "value");
+                return true;
+            }
+            catch (FormatException)
+            {
+                return false;
+            }
         }
 
         private static void ValidateBeforeSave(GameObject root)
