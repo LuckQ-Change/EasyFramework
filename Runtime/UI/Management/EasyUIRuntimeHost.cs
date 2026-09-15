@@ -183,8 +183,8 @@ namespace EasyFramework.UI
             if (EventSystem.current != null || FindObjectOfType<EventSystem>(true) != null) return;
             var eventObject = new GameObject(
                 "[EasyUI EventSystem]",
-                typeof(EasyEventSystem),
-                typeof(EasyStandaloneInputModule));
+                typeof(EventSystem),
+                typeof(StandaloneInputModule));
             eventObject.transform.SetParent(transform, false);
         }
 

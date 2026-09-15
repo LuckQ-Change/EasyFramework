@@ -1,12 +1,20 @@
+using System;
+using System.Reflection;
 using EasyFramework.UI;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.UI;
+using Object = UnityEngine.Object;
 
 namespace EasyFramework.Tests
 {
     public sealed class UIBindingTests
     {
+        public sealed class EditorBindingView : EasyUIView
+        {
+            public ReactiveProperty<int> Level { get; } = new ReactiveProperty<int>(1);
+        }
+
         private sealed class LevelModel
         {
             public ReactiveProperty<int> Level { get; } = new ReactiveProperty<int>(1);
@@ -66,6 +74,36 @@ namespace EasyFramework.Tests
             Object.DestroyImmediate(first);
             Object.DestroyImmediate(second);
             Object.DestroyImmediate(texture);
+        }
+
+        [Test]
+        public void EditorReflection_ResolvesAssemblyQualifiedManagedViewType()
+        {
+            var root = new GameObject("Binding View", typeof(EasyUIDisplay), typeof(UIBindingContext));
+            try
+            {
+                root.GetComponent<EasyUIDisplay>().SetViewScript(
+                    typeof(EditorBindingView).AssemblyQualifiedName,
+                    string.Empty,
+                    string.Empty);
+                Type reflectionType = Type.GetType(
+                    "EasyFramework.Editor.UI.UIBindingEditorReflection, com.wjq.easyframework.editor");
+                Assert.IsNotNull(reflectionType);
+                MethodInfo resolve = reflectionType.GetMethod(
+                    "ResolveSourceType",
+                    BindingFlags.Static | BindingFlags.Public);
+                Assert.IsNotNull(resolve);
+
+                Type resolved = (Type)resolve.Invoke(
+                    null,
+                    new object[] { root.GetComponent<UIBindingContext>() });
+
+                Assert.AreEqual(typeof(EditorBindingView), resolved);
+            }
+            finally
+            {
+                Object.DestroyImmediate(root);
+            }
         }
     }
 }

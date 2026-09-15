@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using EasyFramework.UI;
 using UnityEditor;
 using UnityEngine;
@@ -44,7 +45,11 @@ namespace EasyFramework.Editor.UI
             using (new EditorGUI.DisabledScope(!SupportsTwoWay(component, (UIBindingProperty)targetProperty.enumValueIndex)))
                 EditorGUI.PropertyField(line, twoWay);
             Next(ref line, lineHeight, spacing);
-            string problem = GetProblem(component, (UIBindingProperty)targetProperty.enumValueIndex, sourceKey.stringValue);
+            string problem = GetProblem(
+                component,
+                (UIBindingProperty)targetProperty.enumValueIndex,
+                sourceKey.stringValue,
+                format.stringValue);
             EditorGUI.LabelField(line, string.IsNullOrEmpty(problem) ? "✓ Valid" : "⚠ " + problem,
                 string.IsNullOrEmpty(problem) ? EditorStyles.miniLabel : EditorStyles.miniBoldLabel);
             EditorGUI.indentLevel--;
@@ -80,14 +85,30 @@ namespace EasyFramework.Editor.UI
                 return;
             }
             var choices = new string[members.Length + 1];
-            choices[0] = "<Custom>";
-            Array.Copy(members, 0, choices, 1, members.Length);
+            Array.Copy(members, choices, members.Length);
+            choices[members.Length] = "<自定义…>";
             int index = Array.IndexOf(members, sourceKey.stringValue);
-            float popupWidth = rect.width * 0.55f;
-            var popupRect = new Rect(rect.x, rect.y, popupWidth, rect.height);
-            var textRect = new Rect(rect.x + popupWidth + 4f, rect.y, rect.width - popupWidth - 4f, rect.height);
-            int next = EditorGUI.Popup(popupRect, "Source", index + 1, choices);
-            if (next > 0) sourceKey.stringValue = members[next - 1];
+            int selected = index < 0 ? members.Length : index;
+            Rect popupRect = rect;
+            Rect textRect = rect;
+            if (selected == members.Length)
+            {
+                float popupWidth = rect.width * 0.58f;
+                popupRect.width = popupWidth;
+                textRect.x += popupWidth + 4f;
+                textRect.width -= popupWidth + 4f;
+            }
+            int next = EditorGUI.Popup(popupRect, "Source", selected, choices);
+            if (next < members.Length)
+            {
+                sourceKey.stringValue = members[next];
+                return;
+            }
+            if (selected != members.Length)
+            {
+                sourceKey.stringValue = string.Empty;
+                return;
+            }
             sourceKey.stringValue = EditorGUI.TextField(textRect, sourceKey.stringValue);
         }
 
@@ -117,12 +138,31 @@ namespace EasyFramework.Editor.UI
             (property == UIBindingProperty.Value && (target is Slider || target is Scrollbar || target is Dropdown || HasType(target, "TMPro.TMP_Dropdown"))) ||
             (property == UIBindingProperty.IsOn && target is Toggle);
 
-        private static string GetProblem(Component component, UIBindingProperty property, string sourceKey)
+        private static string GetProblem(
+            Component component,
+            UIBindingProperty property,
+            string sourceKey,
+            string format)
         {
             if (component == null) return "Target is missing";
             if (string.IsNullOrWhiteSpace(sourceKey)) return "Source is empty";
             if (Array.IndexOf(GetSupported(component), property) < 0) return "Property is incompatible with target";
+            if (property == UIBindingProperty.Text && !IsValidFormat(format)) return "Format is invalid";
             return null;
+        }
+
+        private static bool IsValidFormat(string format)
+        {
+            if (string.IsNullOrEmpty(format)) return true;
+            try
+            {
+                string.Format(CultureInfo.InvariantCulture, format, "value");
+                return true;
+            }
+            catch (FormatException)
+            {
+                return false;
+            }
         }
 
         private static bool HasType(Component component, string fullName)

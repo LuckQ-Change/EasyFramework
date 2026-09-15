@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Reflection;
 using EasyFramework.UI;
 using NUnit.Framework;
@@ -45,6 +46,21 @@ namespace EasyFramework.Tests
             {
                 UnityEngine.Object.DestroyImmediate(gameObject);
             }
+        }
+
+        [Test]
+        public void Converter_OnlyOffersEasyImageForForwardConversion()
+        {
+            Type converter = Type.GetType(
+                "EasyFramework.Editor.UI.EasyUGUIComponentConverter, com.wjq.easyframework.editor");
+            Assert.IsNotNull(converter);
+            FieldInfo mapField = converter.GetField("ToEasy", BindingFlags.Static | BindingFlags.NonPublic);
+            Assert.IsNotNull(mapField);
+            var map = (IDictionary)mapField.GetValue(null);
+
+            Assert.AreEqual(1, map.Count);
+            Assert.AreEqual(typeof(EasyImage), map[typeof(Image)]);
+            Assert.IsFalse(map.Contains(typeof(Button)));
         }
     }
 }

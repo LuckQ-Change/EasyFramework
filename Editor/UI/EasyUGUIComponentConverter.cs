@@ -22,42 +22,47 @@ namespace EasyFramework.Editor.UI
         private static readonly Dictionary<Type, Type> ToEasy = new Dictionary<Type, Type>
         {
             { typeof(Image), typeof(EasyImage) },
-            { typeof(RawImage), typeof(EasyRawImage) },
-            { typeof(Text), typeof(EasyText) },
-            { typeof(Button), typeof(EasyButton) },
-            { typeof(Selectable), typeof(EasySelectable) },
-            { typeof(Toggle), typeof(EasyToggle) },
-            { typeof(Slider), typeof(EasySlider) },
-            { typeof(Scrollbar), typeof(EasyScrollbar) },
-            { typeof(Dropdown), typeof(EasyDropdown) },
-            { typeof(InputField), typeof(EasyInputField) },
-            { typeof(ScrollRect), typeof(EasyScrollRect) },
-            { typeof(Mask), typeof(EasyMask) },
-            { typeof(RectMask2D), typeof(EasyRectMask2D) },
-            { typeof(HorizontalLayoutGroup), typeof(EasyHorizontalLayoutGroup) },
-            { typeof(VerticalLayoutGroup), typeof(EasyVerticalLayoutGroup) },
-            { typeof(GridLayoutGroup), typeof(EasyGridLayoutGroup) },
-            { typeof(ContentSizeFitter), typeof(EasyContentSizeFitter) },
-            { typeof(AspectRatioFitter), typeof(EasyAspectRatioFitter) },
-            { typeof(CanvasScaler), typeof(EasyCanvasScaler) },
-            { typeof(GraphicRaycaster), typeof(EasyGraphicRaycaster) },
-            { typeof(Shadow), typeof(EasyShadow) },
-            { typeof(Outline), typeof(EasyOutline) },
-            { typeof(PositionAsUV1), typeof(EasyPositionAsUV1) },
-            { typeof(LayoutElement), typeof(EasyLayoutElement) },
-            { typeof(ToggleGroup), typeof(EasyToggleGroup) },
-            { typeof(EventSystem), typeof(EasyEventSystem) },
-            { typeof(EventTrigger), typeof(EasyEventTrigger) },
-            { typeof(BaseInput), typeof(EasyBaseInput) },
-            { typeof(StandaloneInputModule), typeof(EasyStandaloneInputModule) },
-#pragma warning disable 618
-            { typeof(TouchInputModule), typeof(EasyTouchInputModule) },
-#pragma warning restore 618
-            { typeof(PhysicsRaycaster), typeof(EasyPhysicsRaycaster) },
-            { typeof(Physics2DRaycaster), typeof(EasyPhysics2DRaycaster) },
         };
 
-        private static readonly Dictionary<Type, Type> ToUGUI = BuildReverseMap();
+        // 旧版空包装组件继续保留反向转换能力，避免已有 Prefab 无法迁移；
+        // 新内容只推荐有真实扩展能力的 EasyImage。
+        private static readonly Dictionary<Type, Type> ToUGUI = new Dictionary<Type, Type>
+        {
+            { typeof(EasyImage), typeof(Image) },
+            { typeof(EasyRawImage), typeof(RawImage) },
+            { typeof(EasyText), typeof(Text) },
+            { typeof(EasyButton), typeof(Button) },
+            { typeof(EasySelectable), typeof(Selectable) },
+            { typeof(EasyToggle), typeof(Toggle) },
+            { typeof(EasySlider), typeof(Slider) },
+            { typeof(EasyScrollbar), typeof(Scrollbar) },
+            { typeof(EasyDropdown), typeof(Dropdown) },
+            { typeof(EasyInputField), typeof(InputField) },
+            { typeof(EasyScrollRect), typeof(ScrollRect) },
+            { typeof(EasyMask), typeof(Mask) },
+            { typeof(EasyRectMask2D), typeof(RectMask2D) },
+            { typeof(EasyHorizontalLayoutGroup), typeof(HorizontalLayoutGroup) },
+            { typeof(EasyVerticalLayoutGroup), typeof(VerticalLayoutGroup) },
+            { typeof(EasyGridLayoutGroup), typeof(GridLayoutGroup) },
+            { typeof(EasyContentSizeFitter), typeof(ContentSizeFitter) },
+            { typeof(EasyAspectRatioFitter), typeof(AspectRatioFitter) },
+            { typeof(EasyCanvasScaler), typeof(CanvasScaler) },
+            { typeof(EasyGraphicRaycaster), typeof(GraphicRaycaster) },
+            { typeof(EasyShadow), typeof(Shadow) },
+            { typeof(EasyOutline), typeof(Outline) },
+            { typeof(EasyPositionAsUV1), typeof(PositionAsUV1) },
+            { typeof(EasyLayoutElement), typeof(LayoutElement) },
+            { typeof(EasyToggleGroup), typeof(ToggleGroup) },
+            { typeof(EasyEventSystem), typeof(EventSystem) },
+            { typeof(EasyEventTrigger), typeof(EventTrigger) },
+            { typeof(EasyBaseInput), typeof(BaseInput) },
+            { typeof(EasyStandaloneInputModule), typeof(StandaloneInputModule) },
+#pragma warning disable 618
+            { typeof(EasyTouchInputModule), typeof(TouchInputModule) },
+#pragma warning restore 618
+            { typeof(EasyPhysicsRaycaster), typeof(PhysicsRaycaster) },
+            { typeof(EasyPhysics2DRaycaster), typeof(Physics2DRaycaster) },
+        };
         private static readonly HashSet<Type> HeaderSwitchTypes = new HashSet<Type>
         {
             typeof(Image),
@@ -105,14 +110,14 @@ namespace EasyFramework.Editor.UI
             };
         }
 
-        [MenuItem("CONTEXT/Component/EasyFramework/切换为 Easy UI 组件", false, 2000)]
+        [MenuItem("CONTEXT/Component/EasyFramework/转换为 EasyImage（图集索引）", false, 2000)]
         private static void ConvertToEasy(MenuCommand command)
         {
             if (command.context is Component component && ToEasy.TryGetValue(component.GetType(), out var targetType))
                 Replace(component, targetType);
         }
 
-        [MenuItem("CONTEXT/Component/EasyFramework/切换为 Easy UI 组件", true)]
+        [MenuItem("CONTEXT/Component/EasyFramework/转换为 EasyImage（图集索引）", true)]
         private static bool ValidateConvertToEasy(MenuCommand command) =>
             command.context is Component component && ToEasy.ContainsKey(component.GetType());
 
@@ -127,44 +132,20 @@ namespace EasyFramework.Editor.UI
         private static bool ValidateConvertToUGUI(MenuCommand command) =>
             command.context is Component component && ToUGUI.ContainsKey(component.GetType());
 
-        [MenuItem("Tools/EasyFramework/UI/切换选中层级 Image 为 EasyImage", false, 100)]
-        private static void ConvertSelectedImages()
-        {
-            ConvertSelection(true);
-        }
-
-        [MenuItem("Tools/EasyFramework/UI/还原选中层级 EasyImage 为 Image", false, 101)]
-        private static void ConvertSelectedEasyImages()
-        {
-            ConvertSelection(false);
-        }
-
-        [MenuItem("Tools/EasyFramework/UI/扫描选中层级 Image 替换影响", false, 99)]
-        private static void ScanSelectedImpact()
-        {
-            GetSelectionImpact(true, out int convertibleCount, out int referenceCount, true);
-            EditorUtility.DisplayDialog(
-                "Easy UI 替换影响",
-                $"可替换 Image：{convertibleCount}\n" +
-                $"已加载场景 / 当前 Prefab 上下文引用：{referenceCount}\n\n" +
-                "引用明细已输出到 Console。未加载的 Prefab 不在本报告范围内。",
-                "确定");
-        }
-
-        private static void ConvertSelection(bool toEasy)
+        internal static void ConvertSelection(bool toEasy)
         {
             GetSelectionImpact(toEasy, out int convertibleCount, out int referenceCount, false);
             if (convertibleCount == 0)
             {
                 EditorUtility.DisplayDialog(
                     "Easy UI",
-                    toEasy ? "当前选择层级中没有可切换的 Image。" : "当前选择层级中没有可还原的 EasyImage。",
+                    toEasy ? "当前选择层级中没有可转换的 Image。" : "当前选择层级中没有可还原的 Easy UI 包装组件。",
                     "确定");
                 return;
             }
 
-            string sourceName = toEasy ? "Image" : "EasyImage";
-            string targetName = toEasy ? "EasyImage" : "Image";
+            string sourceName = toEasy ? "Image" : "Easy UI 包装组件";
+            string targetName = toEasy ? "EasyImage" : "原生 UGUI 组件";
             if (!EditorUtility.DisplayDialog(
                     "Easy UI 替换确认",
                     $"将把选中层级中的 {convertibleCount} 个 {sourceName} 替换为 {targetName}。\n" +
@@ -185,12 +166,12 @@ namespace EasyFramework.Editor.UI
             {
                 EditorUtility.DisplayDialog(
                     "Easy UI",
-                    toEasy ? "当前选择层级中没有可切换的 Image。" : "当前选择层级中没有可还原的 EasyImage。",
+                    toEasy ? "当前选择层级中没有可转换的 Image。" : "当前选择层级中没有可还原的 Easy UI 包装组件。",
                     "确定");
             }
         }
 
-        private static void GetSelectionImpact(
+        internal static void GetSelectionImpact(
             bool toEasy,
             out int convertibleCount,
             out int referenceCount,
@@ -213,25 +194,20 @@ namespace EasyFramework.Editor.UI
             }
         }
 
+        internal static int CountSelection(bool toEasy) => CollectSelection(toEasy).Count;
+
         private static List<Component> CollectSelection(bool toEasy)
         {
             var result = new List<Component>();
             var seen = new HashSet<Component>();
+            Dictionary<Type, Type> map = toEasy ? ToEasy : ToUGUI;
             foreach (GameObject selected in Selection.gameObjects)
             {
                 if (selected == null) continue;
                 foreach (Component component in selected.GetComponentsInChildren<Component>(true))
                 {
                     if (component == null || !seen.Add(component)) continue;
-                    Type type = component.GetType();
-                    if (toEasy)
-                    {
-                        if (type == typeof(Image)) result.Add(component);
-                    }
-                    else if (type == typeof(EasyImage))
-                    {
-                        result.Add(component);
-                    }
+                    if (map.ContainsKey(component.GetType())) result.Add(component);
                 }
             }
             return result;
@@ -372,11 +348,5 @@ namespace EasyFramework.Editor.UI
             }
         }
 
-        private static Dictionary<Type, Type> BuildReverseMap()
-        {
-            var result = new Dictionary<Type, Type>();
-            foreach (var pair in ToEasy) result[pair.Value] = pair.Key;
-            return result;
-        }
     }
 }

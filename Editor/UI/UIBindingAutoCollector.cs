@@ -36,6 +36,39 @@ namespace EasyFramework.Editor.UI
             return result;
         }
 
+        public static List<UIBindingDefinition> Merge(
+            UIBindingContext context,
+            IEnumerable<UIBindingDefinition> collected,
+            out int addedCount)
+        {
+            var result = new List<UIBindingDefinition>();
+            if (context != null) result.AddRange(context.Bindings);
+            addedCount = 0;
+            if (collected == null) return result;
+
+            foreach (UIBindingDefinition candidate in collected)
+            {
+                if (candidate == null || Contains(result, candidate)) continue;
+                result.Add(candidate);
+                addedCount++;
+            }
+            return result;
+        }
+
+        private static bool Contains(
+            List<UIBindingDefinition> bindings,
+            UIBindingDefinition candidate)
+        {
+            for (int i = 0; i < bindings.Count; i++)
+            {
+                UIBindingDefinition existing = bindings[i];
+                if (existing != null && existing.Target == candidate.Target &&
+                    existing.TargetProperty == candidate.TargetProperty)
+                    return true;
+            }
+            return false;
+        }
+
         private static bool TryFindTarget(
             Transform node,
             UIBindingProperty? requested,

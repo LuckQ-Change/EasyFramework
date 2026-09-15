@@ -4,7 +4,7 @@ UI 采用“Prefab + 一个纯 C# View + 运行时 Binding”的结构。没有 
 
 ## 1. 生成结果
 
-打开 `Tools/EasyFramework/UI/Create Display`，只需配置名称、Prefab 路径、资源地址、命名空间和脚本路径。
+打开 `Tools/EasyFramework/UI/Create Display`，默认只需填写界面名称。Prefab 路径、脚本路径和命名空间会记住上次设置，资源地址默认自动生成为 `UI/<界面名称>`；只有项目使用特殊寻址规则时才展开高级设置修改。
 
 ```text
 LoginView.prefab   // EasyUIDisplay、可选 UIBindingContext、序列化引用
@@ -27,7 +27,7 @@ public sealed class LoginView : EasyUIView<LoginViewArgs>
 
 ## 2. 获取 Prefab 组件
 
-在 Prefab 任意节点添加 `EasyUIReference`，配置 Key 和目标组件。例如：
+在 Prefab 任意节点添加 `EasyUIReference` 并拖入目标组件。Target 赋值后 Inspector 会自动生成 Display 内唯一的 Key，也可以按项目习惯修改。例如：
 
 ```text
 Key: CloseButton
@@ -60,6 +60,8 @@ Binding 销毁时会自动释放它持有的资源 Lease。
 ## 3. 可选响应式绑定
 
 `UIBindingContext` 仍可用于少量确实需要的响应式绑定，但它是可选能力，不参与脚本生成。普通页面完全可以只使用 `EasyUIReference + Binding.Get<T>()`。
+
+绑定 Source 会优先显示 View 上可绑定响应属性的下拉列表。`bind_` 自动收集默认采用合并模式，不会直接覆盖已有手工绑定；需要完全重建时可在确认窗口选择覆盖。
 
 ## 4. 打开与关闭
 
@@ -110,8 +112,10 @@ await LoadingModule.Instance.RunAsync(
 只有需要 **Sprite 列表 / 按索引切图** 时，才把 Image 换成 `EasyImage`：
 
 - Inspector 标题栏：仅 Image / EasyImage 显示切换按钮
-- `Tools/EasyFramework/UI/切换选中层级 Image 为 EasyImage`
-- 组件右键菜单仍可转换其它包装类型，但那些包装没有额外能力
+- `Tools/EasyFramework/UI/Easy UI Editor`：集中扫描、转换和还原选中层级
+- Image 组件右键菜单：转换为 EasyImage；旧 Easy 包装组件右键菜单：还原为原生 UGUI
+
+`EasyButton`、`EasyText` 等没有额外行为的旧包装类型只保留兼容和还原能力，不再提供正向批量替换入口。新页面继续使用原生 UGUI 即可。
 
 切换不会再自动挂上 `EasyUIElement`。状态机是单独加的。
 

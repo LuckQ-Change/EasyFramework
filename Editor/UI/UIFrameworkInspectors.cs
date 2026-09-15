@@ -24,7 +24,9 @@ namespace EasyFramework.Editor.UI
         {
             serializedObject.Update();
 
-            EditorGUILayout.LabelField("启动流程", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("EasyFramework 启动配置", new GUIStyle(EditorStyles.boldLabel) { fontSize = 14 });
+            EditorGUILayout.Space(4f);
+            DrawSection("启动流程");
             EditorGUI.BeginChangeCheck();
             MonoScript selected = (MonoScript)EditorGUILayout.ObjectField(
                 "启动流程脚本",
@@ -43,11 +45,68 @@ namespace EasyFramework.Editor.UI
                     MessageType.Info);
 
             EditorGUILayout.Space();
-            DrawPropertiesExcluding(
-                serializedObject,
-                "m_Script",
-                "_startupProcedureTypeName");
+            SerializedProperty startUI = serializedObject.FindProperty("_startUI");
+            DrawSection("UI 启动");
+            EditorGUILayout.PropertyField(startUI, new GUIContent("启用 UI"));
+            using (new EditorGUI.DisabledScope(!startUI.boolValue))
+            {
+                SerializedProperty renderMode = serializedObject.FindProperty("_renderMode");
+                EditorGUILayout.PropertyField(renderMode, new GUIContent("渲染模式"));
+                if ((EasyUIRenderMode)renderMode.enumValueIndex == EasyUIRenderMode.ScreenSpaceCamera)
+                {
+                    EditorGUILayout.PropertyField(serializedObject.FindProperty("_uiCamera"), new GUIContent("UI 相机"));
+                    EditorGUILayout.PropertyField(
+                        serializedObject.FindProperty("_createCameraWhenMissing"),
+                        new GUIContent("缺少时自动创建相机"));
+                }
+                EditorGUILayout.PropertyField(
+                    serializedObject.FindProperty("_createEventSystem"),
+                    new GUIContent("自动创建 EventSystem"));
+
+                DrawSection("相机与层级");
+                DrawLayerField(serializedObject.FindProperty("_uiLayerName"));
+                if ((EasyUIRenderMode)renderMode.enumValueIndex == EasyUIRenderMode.ScreenSpaceCamera)
+                {
+                    EditorGUILayout.PropertyField(serializedObject.FindProperty("_cameraDepth"), new GUIContent("相机深度"));
+                    EditorGUILayout.PropertyField(serializedObject.FindProperty("_planeDistance"), new GUIContent("平面距离"));
+                }
+
+                DrawSection("屏幕适配");
+                EditorGUILayout.PropertyField(
+                    serializedObject.FindProperty("_referenceResolution"),
+                    new GUIContent("参考分辨率"));
+                EditorGUILayout.Slider(
+                    serializedObject.FindProperty("_matchWidthOrHeight"),
+                    0f,
+                    1f,
+                    new GUIContent("宽高匹配"));
+
+                DrawSection("共享背景");
+                EditorGUILayout.PropertyField(
+                    serializedObject.FindProperty("_backgroundPrefab"),
+                    new GUIContent("背景 Prefab"));
+            }
+
+            DrawSection("运行环境");
+            EditorGUILayout.PropertyField(serializedObject.FindProperty("_runtimeMode"), new GUIContent("运行模式"));
+            DrawSection("全局 Loading");
+            EditorGUILayout.PropertyField(serializedObject.FindProperty("_loading"), GUIContent.none, true);
             serializedObject.ApplyModifiedProperties();
+        }
+
+        private static void DrawSection(string title)
+        {
+            EditorGUILayout.Space(6f);
+            EditorGUILayout.LabelField(title, EditorStyles.boldLabel);
+        }
+
+        private static void DrawLayerField(SerializedProperty layerName)
+        {
+            int current = LayerMask.NameToLayer(layerName.stringValue);
+            if (current < 0) current = Mathf.Max(0, LayerMask.NameToLayer("UI"));
+            int next = EditorGUILayout.LayerField(new GUIContent("UI Layer"), current);
+            string selected = LayerMask.LayerToName(next);
+            if (!string.IsNullOrEmpty(selected)) layerName.stringValue = selected;
         }
 
         private void ApplySelectedScript(MonoScript script)
@@ -144,14 +203,29 @@ namespace EasyFramework.Editor.UI
             EditorGUILayout.Space();
             var context = (UIBindingContext)target;
             DrawBindingValidation(context);
-            if (GUILayout.Button("自动收集 bind_ 节点"))
+            if (GUILayout.Button("智能收集 bind_ 节点", GUILayout.Height(26f)))
             {
-                Undo.RecordObject(context, "Collect UI bindings");
-                context.ReplaceBindings(UIBindingAutoCollector.Collect(context));
-                EditorUtility.SetDirty(context);
+                List<UIBindingDefinition> collected = UIBindingAutoCollector.Collect(context);
+                List<UIBindingDefinition> merged = UIBindingAutoCollector.Merge(
+                    context,
+                    collected,
+                    out int addedCount);
+                int choice = EditorUtility.DisplayDialogComplex(
+                    "收集 UI Binding",
+                    $"扫描到 {collected.Count} 条绑定，其中 {addedCount} 条是新绑定。\n\n" +
+                    "推荐合并以保留已有手工配置；覆盖会清空现有列表后重新生成。",
+                    $"合并（新增 {addedCount}）",
+                    "取消",
+                    $"覆盖（{collected.Count}）");
+                if (choice != 1)
+                {
+                    Undo.RecordObject(context, "Collect UI bindings");
+                    context.ReplaceBindings(choice == 0 ? merged : collected);
+                    EditorUtility.SetDirty(context);
+                }
             }
             EditorGUILayout.HelpBox(
-                "命名规则：bind_Level 自动推断属性；bind_Level$Text 可显式指定 Text。响应绑定保存在 Prefab 的 UIBindingContext 中，不生成脚本。",
+                "命名规则：bind_Level 自动推断属性；bind_Level$Text 可显式指定 Text。默认合并，不再直接覆盖已有绑定。",
                 MessageType.Info);
         }
 

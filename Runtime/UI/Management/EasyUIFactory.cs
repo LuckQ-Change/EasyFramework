@@ -32,14 +32,14 @@ namespace EasyFramework.UI
         {
             logic = null;
             binding = null;
-            Type logicType = Resolve(viewTypeName);
+            Type logicType = ResolveType(viewTypeName);
             if (logicType == null || !typeof(EasyUIObject).IsAssignableFrom(logicType)) return false;
             logic = Activator.CreateInstance(logicType) as EasyUIObject;
             binding = new EasyUIBinding();
             return logic != null;
         }
 
-        private static Type Resolve(string typeName)
+        internal static Type ResolveType(string typeName)
         {
             if (string.IsNullOrWhiteSpace(typeName)) return null;
             Type type = Type.GetType(typeName, false);

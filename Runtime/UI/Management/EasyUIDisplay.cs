@@ -36,7 +36,19 @@ namespace EasyFramework.UI
 
         public string ViewTypeName => _viewTypeName;
         public string ViewScriptPath => _viewScriptPath;
-        public string PrefabLocation => _prefabLocation;
+        /// <summary>
+        /// View 脚本上的 EasyUIPrefab 是资源地址的权威来源；序列化字段仅为脚本尚未编译时的回退缓存。
+        /// </summary>
+        public string PrefabLocation
+        {
+            get
+            {
+                Type viewType = EasyUIFactory.ResolveType(_viewTypeName);
+                return EasyUIFactory.TryGetPrefabLocation(viewType, out string location)
+                    ? location
+                    : _prefabLocation;
+            }
+        }
         public bool ManagedAsView => _managedAsView;
         public string ViewId => _viewId;
         public UILayer DefaultLayer => _defaultLayer;
