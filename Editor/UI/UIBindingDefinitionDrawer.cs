@@ -128,7 +128,7 @@ namespace EasyFramework.Editor.UI
                 result.Add(UIBindingProperty.Sprite);
                 result.Add(UIBindingProperty.FillAmount);
             }
-            if (target is EasyImage) result.Add(UIBindingProperty.SpriteIndex);
+            if (target is UIImage) result.Add(UIBindingProperty.SpriteIndex);
             if (target is CanvasGroup) result.Add(UIBindingProperty.Alpha);
             return result.ToArray();
         }

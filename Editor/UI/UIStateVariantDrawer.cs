@@ -94,7 +94,7 @@ namespace EasyFramework.Editor.UI
 
         private static void DrawStatePopup(Rect rect, SerializedProperty variant, SerializedProperty state)
         {
-            if (!(variant.serializedObject.targetObject is EasyUIElement element) || element.Controller == null ||
+            if (!(variant.serializedObject.targetObject is UIElement element) || element.Controller == null ||
                 element.Controller.States.Count == 0)
             {
                 EditorGUI.PropertyField(rect, state, new GUIContent("State"));
@@ -122,14 +122,14 @@ namespace EasyFramework.Editor.UI
 
         private static UIStateProperty GetSupportedProperties(SerializedProperty property)
         {
-            if (!(property.serializedObject.targetObject is EasyUIElement element)) return UIStateProperty.All;
+            if (!(property.serializedObject.targetObject is UIElement element)) return UIStateProperty.All;
 
             UIStateProperty result = UIStateProperty.Active;
             if (element.TryGetComponent<Selectable>(out _)) result |= UIStateProperty.Interactable;
             if (element.TryGetComponent<Graphic>(out _)) result |= UIStateProperty.Color;
             if (element.TryGetComponent<CanvasGroup>(out _)) result |= UIStateProperty.Alpha;
             if (element.TryGetComponent<Image>(out _)) result |= UIStateProperty.Sprite | UIStateProperty.Value;
-            if (element.TryGetComponent<EasyImage>(out _)) result |= UIStateProperty.SpriteIndex;
+            if (element.TryGetComponent<UIImage>(out _)) result |= UIStateProperty.SpriteIndex;
             if (element.TryGetComponent<Text>(out _) || element.TryGetComponent<InputField>(out _) ||
                 HasComponent(element, "TMPro.TMP_Text") || HasComponent(element, "TMPro.TMP_InputField"))
                 result |= UIStateProperty.Text;
@@ -140,7 +140,7 @@ namespace EasyFramework.Editor.UI
             return result;
         }
 
-        private static bool HasComponent(EasyUIElement element, string fullName)
+        private static bool HasComponent(UIElement element, string fullName)
         {
             foreach (Component component in element.GetComponents<Component>())
             {
@@ -177,7 +177,7 @@ namespace EasyFramework.Editor.UI
         private static string GetLabel(SerializedProperty variant, UIStateProperty property)
         {
             if (property == UIStateProperty.Value &&
-                variant.serializedObject.targetObject is EasyUIElement element &&
+                variant.serializedObject.targetObject is UIElement element &&
                 element.TryGetComponent<Image>(out _))
                 return "Fill Amount";
             if (property == UIStateProperty.SpriteIndex) return "Sprite Index";

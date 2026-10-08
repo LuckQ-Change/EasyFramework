@@ -24,7 +24,7 @@ namespace EasyFramework.Tests
         [Test]
         public void StartupProcedureType_ResolvesAndStartsProjectProcedure()
         {
-            var config = ScriptableObject.CreateInstance<EasyFrameworkStartupConfig>();
+            var config = ScriptableObject.CreateInstance<FrameworkStartupConfig>();
             var modules = new ModuleManager();
             try
             {
@@ -55,7 +55,7 @@ namespace EasyFramework.Tests
         [Test]
         public void Apply_WithEmptyLoadingPrefab_DoesNotCreateLoadingHost()
         {
-            var config = ScriptableObject.CreateInstance<EasyFrameworkStartupConfig>();
+            var config = ScriptableObject.CreateInstance<FrameworkStartupConfig>();
             try
             {
                 var serialized = new SerializedObject(config);
@@ -63,11 +63,11 @@ namespace EasyFramework.Tests
                 serialized.ApplyModifiedPropertiesWithoutUndo();
 
                 Assert.IsNull(config.Apply());
-                Assert.IsNull(Object.FindObjectOfType<EasyLoadingRuntimeHost>(true));
+                Assert.IsNull(Object.FindObjectOfType<LoadingRuntimeHost>(true));
             }
             finally
             {
-                EasyLoadingRuntimeHost loadingHost = Object.FindObjectOfType<EasyLoadingRuntimeHost>(true);
+                LoadingRuntimeHost loadingHost = Object.FindObjectOfType<LoadingRuntimeHost>(true);
                 if (loadingHost != null) Object.DestroyImmediate(loadingHost.gameObject);
                 Object.DestroyImmediate(config);
             }
@@ -76,13 +76,13 @@ namespace EasyFramework.Tests
         [Test]
         public void Apply_CreatesCameraCanvasAndEventSystem()
         {
-            var config = ScriptableObject.CreateInstance<EasyFrameworkStartupConfig>();
-            EasyUIRuntimeHost host = null;
+            var config = ScriptableObject.CreateInstance<FrameworkStartupConfig>();
+            UIRuntimeHost host = null;
             try
             {
                 var serialized = new SerializedObject(config);
                 serialized.FindProperty("_startUI").boolValue = true;
-                serialized.FindProperty("_renderMode").enumValueIndex = (int)EasyUIRenderMode.ScreenSpaceCamera;
+                serialized.FindProperty("_renderMode").enumValueIndex = (int)UIRenderMode.ScreenSpaceCamera;
                 serialized.FindProperty("_createCameraWhenMissing").boolValue = true;
                 serialized.FindProperty("_createEventSystem").boolValue = true;
                 serialized.ApplyModifiedPropertiesWithoutUndo();
@@ -108,9 +108,9 @@ namespace EasyFramework.Tests
         [Test]
         public void Apply_CreatesIndependentOverlayLoadingCanvas()
         {
-            var config = ScriptableObject.CreateInstance<EasyFrameworkStartupConfig>();
+            var config = ScriptableObject.CreateInstance<FrameworkStartupConfig>();
             var loadingContent = new GameObject("Loading Content", typeof(RectTransform));
-            EasyLoadingRuntimeHost loadingHost = null;
+            LoadingRuntimeHost loadingHost = null;
             try
             {
                 var serialized = new SerializedObject(config);
@@ -121,8 +121,8 @@ namespace EasyFramework.Tests
                 loading.FindPropertyRelative("_prefab").objectReferenceValue = loadingContent;
                 serialized.ApplyModifiedPropertiesWithoutUndo();
 
-                EasyUIRuntimeHost uiHost = config.Apply();
-                loadingHost = Object.FindObjectOfType<EasyLoadingRuntimeHost>(true);
+                UIRuntimeHost uiHost = config.Apply();
+                loadingHost = Object.FindObjectOfType<LoadingRuntimeHost>(true);
 
                 Assert.IsNull(uiHost);
                 Assert.NotNull(loadingHost);

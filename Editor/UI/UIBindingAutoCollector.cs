@@ -28,7 +28,7 @@ namespace EasyFramework.Editor.UI
 
                 if (!TryFindTarget(current, explicitProperty, out var target, out var property, out var twoWay))
                 {
-                    Debug.LogWarning($"[Easy UI] {current.name} 没有与绑定属性兼容的 UGUI 组件。", current);
+                    Debug.LogWarning($"[UI] {current.name} 没有与绑定属性兼容的 UGUI 组件。", current);
                     continue;
                 }
                 result.Add(new UIBindingDefinition(target, property, expression, "{0}", twoWay));
@@ -132,7 +132,7 @@ namespace EasyFramework.Editor.UI
                 case UIBindingProperty.FillAmount:
                     return node.GetComponent<Image>();
                 case UIBindingProperty.SpriteIndex:
-                    return node.GetComponent<EasyImage>();
+                    return node.GetComponent<UIImage>();
                 case UIBindingProperty.Alpha:
                     return node.GetComponent<CanvasGroup>();
                 case UIBindingProperty.Active:

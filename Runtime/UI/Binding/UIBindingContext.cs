@@ -144,8 +144,8 @@ namespace EasyFramework.UI
                     if (target is Image fillImage && Try<float>(value, out var fill)) fillImage.fillAmount = fill;
                     break;
                 case UIBindingProperty.SpriteIndex:
-                    if (target is EasyImage easyImage && Try<int>(value, out var spriteIndex))
-                        easyImage.SetSpriteIndex(spriteIndex);
+                    if (target is UIImage uiImage && Try<int>(value, out var spriteIndex))
+                        uiImage.SetSpriteIndex(spriteIndex);
                     break;
                 case UIBindingProperty.Active:
                     if (Try<bool>(value, out var active)) target.gameObject.SetActive(active);
