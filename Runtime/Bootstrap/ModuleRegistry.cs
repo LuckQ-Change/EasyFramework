@@ -13,11 +13,11 @@ namespace EasyFramework
             if (_extraRegistrars.Contains(registrar)) return;
             _extraRegistrars.Add(registrar);
 
-            if (EasyEntry.IsRunning)
+            if (Entry.IsRunning)
             {
                 try
                 {
-                    EasyEntry.Install(registrar);
+                    Entry.Install(registrar);
                 }
                 catch
                 {

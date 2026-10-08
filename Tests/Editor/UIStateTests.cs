@@ -10,19 +10,19 @@ namespace EasyFramework.Tests
         [Test]
         public void SetState_UpdatesSelectedIndex_AndAppliesChild()
         {
-            var root = new GameObject("State Root", typeof(RectTransform), typeof(EasyUIStateController));
+            var root = new GameObject("State Root", typeof(RectTransform), typeof(UIStateController));
             var child = new GameObject(
                 "Image",
                 typeof(RectTransform),
                 typeof(CanvasRenderer),
                 typeof(Image),
-                typeof(EasyUIElement));
+                typeof(UIElement));
             child.transform.SetParent(root.transform, false);
             try
             {
-                var controller = root.GetComponent<EasyUIStateController>();
+                var controller = root.GetComponent<UIStateController>();
                 var image = child.GetComponent<Image>();
-                var element = child.GetComponent<EasyUIElement>();
+                var element = child.GetComponent<UIElement>();
                 element.Controller = controller;
                 image.color = Color.white;
                 element.CaptureDefault();
@@ -44,10 +44,10 @@ namespace EasyFramework.Tests
         [Test]
         public void AddState_CanDefineMultipleCustomStates()
         {
-            var root = new GameObject("State Root", typeof(EasyUIStateController));
+            var root = new GameObject("State Root", typeof(UIStateController));
             try
             {
-                var controller = root.GetComponent<EasyUIStateController>();
+                var controller = root.GetComponent<UIStateController>();
                 Assert.IsTrue(controller.AddState("Hover"));
                 Assert.IsTrue(controller.AddState("Pressed"));
                 Assert.IsTrue(controller.AddState());
@@ -66,19 +66,19 @@ namespace EasyFramework.Tests
         [Test]
         public void RenameState_KeepsRecordedVariant()
         {
-            var root = new GameObject("State Root", typeof(RectTransform), typeof(EasyUIStateController));
+            var root = new GameObject("State Root", typeof(RectTransform), typeof(UIStateController));
             var child = new GameObject(
                 "Image",
                 typeof(RectTransform),
                 typeof(CanvasRenderer),
                 typeof(Image),
-                typeof(EasyUIElement));
+                typeof(UIElement));
             child.transform.SetParent(root.transform, false);
             try
             {
-                var controller = root.GetComponent<EasyUIStateController>();
+                var controller = root.GetComponent<UIStateController>();
                 var image = child.GetComponent<Image>();
-                var element = child.GetComponent<EasyUIElement>();
+                var element = child.GetComponent<UIElement>();
                 element.Controller = controller;
                 image.color = Color.white;
                 element.CaptureDefault();
@@ -102,13 +102,13 @@ namespace EasyFramework.Tests
         [Test]
         public void Element_SyncsVariantsToControllerStates()
         {
-            var root = new GameObject("State Root", typeof(EasyUIStateController));
-            var child = new GameObject("Child", typeof(RectTransform), typeof(EasyUIElement));
+            var root = new GameObject("State Root", typeof(UIStateController));
+            var child = new GameObject("Child", typeof(RectTransform), typeof(UIElement));
             child.transform.SetParent(root.transform);
             try
             {
-                var element = child.GetComponent<EasyUIElement>();
-                element.Controller = root.GetComponent<EasyUIStateController>();
+                var element = child.GetComponent<UIElement>();
+                element.Controller = root.GetComponent<UIStateController>();
                 Assert.AreEqual(2, element.Variants.Count);
                 Assert.AreEqual("Normal", element.Variants[0].State);
                 Assert.AreEqual("Disabled", element.Variants[1].State);
@@ -123,19 +123,19 @@ namespace EasyFramework.Tests
         [Test]
         public void ApplyState_UsesCapturedVariant_AndDefaultRestore()
         {
-            var root = new GameObject("State Root", typeof(RectTransform), typeof(EasyUIStateController));
+            var root = new GameObject("State Root", typeof(RectTransform), typeof(UIStateController));
             var child = new GameObject(
                 "Image",
                 typeof(RectTransform),
                 typeof(CanvasRenderer),
                 typeof(Image),
-                typeof(EasyUIElement));
+                typeof(UIElement));
             child.transform.SetParent(root.transform, false);
             try
             {
-                var controller = root.GetComponent<EasyUIStateController>();
+                var controller = root.GetComponent<UIStateController>();
                 var image = child.GetComponent<Image>();
-                var element = child.GetComponent<EasyUIElement>();
+                var element = child.GetComponent<UIElement>();
                 element.Controller = controller;
                 image.color = Color.white;
                 element.CaptureDefault();
@@ -158,21 +158,21 @@ namespace EasyFramework.Tests
         }
 
         [Test]
-        public void NativeImage_CanJoinStateMachine_WithoutEasyImage()
+        public void NativeImage_CanJoinStateMachine_WithoutUIImage()
         {
-            var root = new GameObject("State Root", typeof(RectTransform), typeof(EasyUIStateController));
+            var root = new GameObject("State Root", typeof(RectTransform), typeof(UIStateController));
             var child = new GameObject(
                 "Image",
                 typeof(RectTransform),
                 typeof(CanvasRenderer),
                 typeof(Image),
-                typeof(EasyUIElement));
+                typeof(UIElement));
             child.transform.SetParent(root.transform, false);
             try
             {
-                Assert.IsNull(child.GetComponent<EasyImage>());
+                Assert.IsNull(child.GetComponent<UIImage>());
                 var image = child.GetComponent<Image>();
-                var element = child.GetComponent<EasyUIElement>();
+                var element = child.GetComponent<UIElement>();
                 image.color = Color.green;
                 element.CaptureDefault();
                 image.color = Color.blue;

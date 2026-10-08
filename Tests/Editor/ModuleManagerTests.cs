@@ -103,7 +103,7 @@ namespace EasyFramework.Tests
             ModuleRegistry.ClearRegistrars();
             try
             {
-                EasyEntry.Init(ModuleRegistry.ApplyAll);
+                Entry.Init(ModuleRegistry.ApplyAll);
                 Assert.IsNull(LateModule.Instance);
 
                 ModuleRegistry.AddRegistrar(modules => modules.Register<LateModule>());
@@ -113,7 +113,7 @@ namespace EasyFramework.Tests
             }
             finally
             {
-                EasyEntry.Shutdown();
+                Entry.Shutdown();
                 ModuleRegistry.ClearRegistrars();
             }
         }

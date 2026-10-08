@@ -14,7 +14,7 @@ TimerModule.Instance.Delay(1f, () => Log.Info("hello"));
 
 自动启动会应用内置启动配置：创建持久化 UI 根节点、独立 UI Camera、Canvas 和 EventSystem。
 可通过 `Assets/Create/EasyFramework/Startup Config` 创建自定义配置，并挂到场景中的
-`EasyFrameworkLauncher`；自动创建 Launcher 时，也可以把配置保存为 `Resources/EasyFrameworkStartupConfig.asset`。
+`FrameworkLauncher`；自动创建 Launcher 时，也可以把配置保存为 `Resources/FrameworkStartupConfig.asset`。
 
 按需模块通过 `ModuleRegistry.AddRegistrar` 注册：
 
@@ -33,7 +33,7 @@ private static void RegisterModules()
 
 完整 API 和生命周期说明见 [使用说明](doc/使用说明.md)，框架约束和测试要求见 [开发指南](doc/开发指南.md)。
 
-UI 使用通用 `EasyUIDisplay`、纯 C# View/Item、可再生 Binding、响应式数据流和 FGUI 风格状态；详见 [UI 框架使用说明](doc/UI框架使用说明.md)。
+UI 业务统一通过 `UIService` 打开、查找和关闭纯 C# View；Prefab 配置、Binding、页面栈与状态机由底层自动管理。详见 [UI 框架使用说明](doc/UI框架使用说明.md)。
 
 ## 设计边界
 

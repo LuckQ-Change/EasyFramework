@@ -26,21 +26,21 @@ namespace EasyFramework.Tests
                 button.targetGraphic = nativeImage;
 
                 Type converter = Type.GetType(
-                    "EasyFramework.Editor.UI.EasyUGUIComponentConverter, com.wjq.easyframework.editor");
+                    "EasyFramework.Editor.UI.UGUIComponentConverter, com.wjq.easyframework.editor");
                 Assert.IsNotNull(converter);
                 MethodInfo replace = converter.GetMethod("Replace", BindingFlags.Static | BindingFlags.NonPublic);
                 Assert.IsNotNull(replace);
 
-                bool converted = (bool)replace.Invoke(null, new object[] { nativeImage, typeof(EasyImage) });
-                var easyImage = gameObject.GetComponent<EasyImage>();
+                bool converted = (bool)replace.Invoke(null, new object[] { nativeImage, typeof(UIImage) });
+                var uiImage = gameObject.GetComponent<UIImage>();
 
                 Assert.IsTrue(converted);
-                Assert.IsNotNull(easyImage);
-                Assert.AreEqual(typeof(EasyImage), gameObject.GetComponent<Image>().GetType());
-                Assert.AreSame(easyImage, button.targetGraphic);
+                Assert.IsNotNull(uiImage);
+                Assert.AreEqual(typeof(UIImage), gameObject.GetComponent<Image>().GetType());
+                Assert.AreSame(uiImage, button.targetGraphic);
                 Assert.IsNull(
-                    gameObject.GetComponent<EasyUIElement>(),
-                    "Switching Image to EasyImage must not attach a state machine component.");
+                    gameObject.GetComponent<UIElement>(),
+                    "Switching Image to UIImage must not attach a state machine component.");
             }
             finally
             {
@@ -49,17 +49,17 @@ namespace EasyFramework.Tests
         }
 
         [Test]
-        public void Converter_OnlyOffersEasyImageForForwardConversion()
+        public void Converter_OnlyOffersUIImageForForwardConversion()
         {
             Type converter = Type.GetType(
-                "EasyFramework.Editor.UI.EasyUGUIComponentConverter, com.wjq.easyframework.editor");
+                "EasyFramework.Editor.UI.UGUIComponentConverter, com.wjq.easyframework.editor");
             Assert.IsNotNull(converter);
-            FieldInfo mapField = converter.GetField("ToEasy", BindingFlags.Static | BindingFlags.NonPublic);
+            FieldInfo mapField = converter.GetField("ToExtended", BindingFlags.Static | BindingFlags.NonPublic);
             Assert.IsNotNull(mapField);
             var map = (IDictionary)mapField.GetValue(null);
 
             Assert.AreEqual(1, map.Count);
-            Assert.AreEqual(typeof(EasyImage), map[typeof(Image)]);
+            Assert.AreEqual(typeof(UIImage), map[typeof(Image)]);
             Assert.IsFalse(map.Contains(typeof(Button)));
         }
     }

@@ -1,18 +1,23 @@
 # Changelog
 
-## [Unreleased]
+## [0.2.0] - 2026-10-08
 
 ### Changed
 
-- 重做 Easy UI 编辑体验：创建 Display 默认只需名称，资源地址自动跟随名称，目录支持选择并记忆，输入错误会在创建前提示。
-- `EasyUIPrefab` 成为 View 资源地址的权威来源，Display 自动读取并同步该地址，避免 Prefab 与脚本配置漂移。
-- `EasyUIReference` 使用紧凑列表编辑器，拖入 Target 后自动生成 Display 内唯一 Key，并即时提示空项和重复项。
+- 移除所有类型和脚本文件的 `Easy` 前缀，不提供旧名称兼容层；核心入口统一为 `Entry`、`Runtime`、`FrameworkLauncher`、`LoadingPresenter`、`UIService`、`UIManager`、`UIView`、`UIDisplay` 等。
+- 新增 `UIService` 业务入口，统一页面打开、查询、返回和关闭 API；显式资源地址收敛为 `OpenAtAsync` 高级入口。
+- `UIView` 新增 `Show`、`Hide`、可见性、焦点与层级状态，页面内部不再需要绕回 Manager/Display。
+- Display Inspector 按“页面 / 嵌套 Item”区分配置，隐藏 Item 无关的页面栈、层级和背景选项。
+- `OpenDisplays` 改为只读视图，并补齐泛型 `TryGet` 与生成页面打开时的取消令牌传递。
+- 重做 UI 编辑体验：创建 Display 默认只需名称，资源地址自动跟随名称，目录支持选择并记忆，输入错误会在创建前提示。
+- `UIPrefab` 成为 View 资源地址的权威来源，Display 自动读取并同步该地址，避免 Prefab 与脚本配置漂移。
+- `UIReference` 使用紧凑列表编辑器，拖入 Target 后自动生成 Display 内唯一 Key，并即时提示空项和重复项。
 - 修复程序集限定 View 类型无法用于响应绑定成员下拉的问题；绑定格式增加编辑期校验，`bind_` 自动收集默认合并且覆盖前确认。
-- 新增统一的 `Easy UI Editor` 组件转换窗口。正向转换只保留有实际扩展能力的 `Image -> EasyImage`，运行时 EventSystem 改用原生 UGUI；旧空包装组件保留兼容并支持批量还原为原生 UGUI。
+- 新增统一的 `UI Editor` 组件转换窗口。只保留有实际扩展能力的 `Image ↔ UIImage` 转换；删除 Button、Text、Slider 等无行为包装组件。
 - Startup Config 与 Display Inspector 重新分组，UI Layer 改为 Unity Layer 下拉，低频字符串配置收进高级区域。
 
-- Easy UI 组件不再强制挂 `EasyUIElement`。原生 UGUI 可直接参与状态机，只有需要图集索引时才把 Image 换成 EasyImage。
-- Image 与 EasyImage 的切换改为按层级处理，并保留已加载引用；不再在每种 UGUI 组件标题栏上推动整表替换。
+- UI 组件不再强制挂 `UIElement`。原生 UGUI 可直接参与状态机，只有需要图集索引时才把 Image 换成 UIImage。
+- Image 与 UIImage 的切换改为按层级处理，并保留已加载引用；不再在每种 UGUI 组件标题栏上推动整表替换。
 - UI 状态机的当前状态会立刻应用到子节点；状态列表支持任意多个自定义名称，改名时保留已记录的变体。保存 Prefab 时仍先写入默认外观。
 
 - 移除框架程序集中的具体业务流程与流程专用启动配置，项目流程现在可直接引用项目 UI 和脚本。

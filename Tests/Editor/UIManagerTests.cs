@@ -1,20 +1,23 @@
 using EasyFramework.UI;
 using NUnit.Framework;
+using System;
+using System.Collections.Generic;
 using System.Collections;
 using System.Threading.Tasks;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.TestTools;
 using UnityEngine.UI;
+using Object = UnityEngine.Object;
 
 namespace EasyFramework.Tests
 {
     public sealed class UIManagerTests
     {
-        private sealed class TestView : EasyUIView { public TestView() { } }
-        [EasyUIPrefab("UI/Canonical")]
-        private sealed class AttributedView : EasyUIView { public AttributedView() { } }
-        private sealed class StatefulView : EasyUIView<int>
+        private sealed class TestView : UIView { public TestView() { } }
+        [UIPrefab("UI/Canonical")]
+        private sealed class AttributedView : UIView { public AttributedView() { } }
+        private sealed class StatefulView : UIView<int>
         {
             public int OpenedWith { get; private set; }
             public bool Closed { get; private set; }
@@ -24,7 +27,7 @@ namespace EasyFramework.Tests
             protected override void OnClosed() => Closed = true;
             protected override void OnDispose() => Disposed = true;
         }
-        private class Item : EasyUIItem { public Item() { } }
+        private class Item : UIItem { public Item() { } }
         private sealed class CostItem : Item { public CostItem() { } }
 
         private sealed class UIPrefabLoader : IAssetLoader
@@ -43,10 +46,10 @@ namespace EasyFramework.Tests
             public void ReleaseAll() { }
         }
 
-        private static EasyUIDisplay CreateDisplayPrefab(string name, string recordId)
+        private static UIDisplay CreateDisplayPrefab(string name, string recordId)
         {
-            var prefab = new GameObject(name, typeof(RectTransform), typeof(EasyUIDisplay));
-            var display = prefab.GetComponent<EasyUIDisplay>();
+            var prefab = new GameObject(name, typeof(RectTransform), typeof(UIDisplay));
+            var display = prefab.GetComponent<UIDisplay>();
             display.SetViewScript(
                 typeof(TestView).FullName,
                 string.Empty,
@@ -57,15 +60,15 @@ namespace EasyFramework.Tests
         [Test]
         public void Open_ReusesSingleton_UsesRequestedLayer_AndBackClosesIt()
         {
-            var managerObject = new GameObject("UI Manager", typeof(RectTransform), typeof(EasyUIRuntimeHost));
-            EasyUIDisplay prefab = CreateDisplayPrefab("Inventory", "inventory-test");
+            var managerObject = new GameObject("UI Manager", typeof(RectTransform), typeof(UIRuntimeHost));
+            UIDisplay prefab = CreateDisplayPrefab("Inventory", "inventory-test");
             try
             {
-                var manager = managerObject.GetComponent<EasyUIRuntimeHost>().Manager;
-                Assert.IsFalse(typeof(MonoBehaviour).IsAssignableFrom(typeof(EasyUIManager)));
-                Assert.IsFalse(typeof(MonoBehaviour).IsAssignableFrom(typeof(EasyUIView)));
-                EasyUIView first = manager.Open(prefab.gameObject, 1, UILayer.Popup);
-                EasyUIView second = manager.Open(prefab.gameObject, 2, UILayer.Popup);
+                var manager = managerObject.GetComponent<UIRuntimeHost>().Manager;
+                Assert.IsFalse(typeof(MonoBehaviour).IsAssignableFrom(typeof(UIManager)));
+                Assert.IsFalse(typeof(MonoBehaviour).IsAssignableFrom(typeof(UIView)));
+                UIView first = manager.Open(prefab.gameObject, 1, UILayer.Popup);
+                UIView second = manager.Open(prefab.gameObject, 2, UILayer.Popup);
 
                 Assert.AreSame(first, second);
                 Assert.AreEqual(
@@ -77,7 +80,11 @@ namespace EasyFramework.Tests
                 Assert.AreSame(manager.GetLayerRoot(UILayer.Popup), first.Display.transform.parent);
                 Assert.AreEqual((int)UILayer.Popup,
                     manager.GetLayerRoot(UILayer.Popup).GetComponent<Canvas>().sortingOrder);
-                Assert.IsTrue(manager.Back());
+                Assert.AreSame(first, UIService.Get<TestView>());
+                Assert.IsTrue(UIService.IsOpen<TestView>());
+                Assert.Throws<NotSupportedException>(
+                    () => ((IList<UIDisplay>)manager.OpenDisplays).Clear());
+                Assert.IsTrue(UIService.Back());
                 Assert.AreEqual(0, manager.OpenCount);
             }
             finally
@@ -90,10 +97,10 @@ namespace EasyFramework.Tests
         [Test]
         public void Display_PrefabLocation_UsesViewAttributeAsCanonicalSource()
         {
-            var gameObject = new GameObject("Canonical", typeof(EasyUIDisplay));
+            var gameObject = new GameObject("Canonical", typeof(UIDisplay));
             try
             {
-                EasyUIDisplay display = gameObject.GetComponent<EasyUIDisplay>();
+                UIDisplay display = gameObject.GetComponent<UIDisplay>();
                 display.SetViewScript(
                     typeof(AttributedView).AssemblyQualifiedName,
                     string.Empty,
@@ -110,20 +117,23 @@ namespace EasyFramework.Tests
         [Test]
         public void SetLayer_HideAndShow_UpdateTopView()
         {
-            var managerObject = new GameObject("UI Manager", typeof(RectTransform), typeof(EasyUIRuntimeHost));
-            EasyUIDisplay firstPrefab = CreateDisplayPrefab("First", "first-test");
-            EasyUIDisplay secondPrefab = CreateDisplayPrefab("Second", "second-test");
+            var managerObject = new GameObject("UI Manager", typeof(RectTransform), typeof(UIRuntimeHost));
+            UIDisplay firstPrefab = CreateDisplayPrefab("First", "first-test");
+            UIDisplay secondPrefab = CreateDisplayPrefab("Second", "second-test");
             try
             {
-                var manager = managerObject.GetComponent<EasyUIRuntimeHost>().Manager;
-                EasyUIView first = manager.Open(firstPrefab.gameObject, layer: UILayer.System);
-                EasyUIView second = manager.Open(secondPrefab.gameObject, layer: UILayer.Screen);
+                var manager = managerObject.GetComponent<UIRuntimeHost>().Manager;
+                UIView first = manager.Open(firstPrefab.gameObject, layer: UILayer.System);
+                UIView second = manager.Open(secondPrefab.gameObject, layer: UILayer.Screen);
                 Assert.AreSame(first, manager.TopView);
-                manager.Hide(first);
+                Assert.IsTrue(first.IsVisible);
+                first.Hide();
+                Assert.IsFalse(first.IsVisible);
                 Assert.AreSame(second, manager.TopView);
                 manager.SetLayer(second, UILayer.System);
                 Assert.AreEqual(UILayer.System, second.Display.CurrentLayer);
-                manager.Show(first);
+                first.Show();
+                Assert.IsTrue(first.IsVisible);
                 Assert.AreSame(first, manager.TopView);
             }
             finally
@@ -137,8 +147,8 @@ namespace EasyFramework.Tests
         [Test]
         public void Open_AppliesConfiguredUnityLayerRecursively()
         {
-            var managerObject = new GameObject("UI Manager", typeof(RectTransform), typeof(EasyUIRuntimeHost));
-            EasyUIDisplay prefab = CreateDisplayPrefab("Layered", "layered-test");
+            var managerObject = new GameObject("UI Manager", typeof(RectTransform), typeof(UIRuntimeHost));
+            UIDisplay prefab = CreateDisplayPrefab("Layered", "layered-test");
             var child = new GameObject("Child", typeof(RectTransform));
             child.transform.SetParent(prefab.transform, false);
             prefab.gameObject.layer = 0;
@@ -146,8 +156,8 @@ namespace EasyFramework.Tests
 
             try
             {
-                EasyUIManager manager = managerObject.GetComponent<EasyUIRuntimeHost>().Manager;
-                EasyUIView view = manager.Open(prefab.gameObject);
+                UIManager manager = managerObject.GetComponent<UIRuntimeHost>().Manager;
+                UIView view = manager.Open(prefab.gameObject);
                 int expectedLayer = manager.RuntimeHost.UILayer;
 
                 Assert.AreEqual(expectedLayer, view.Display.gameObject.layer);
@@ -163,16 +173,16 @@ namespace EasyFramework.Tests
         [Test]
         public void Open_RemovesConflictingCanvasComponentsFromManagedViewRoot()
         {
-            var managerObject = new GameObject("UI Manager", typeof(RectTransform), typeof(EasyUIRuntimeHost));
-            EasyUIDisplay prefab = CreateDisplayPrefab("Canvas View", "canvas-view-test");
+            var managerObject = new GameObject("UI Manager", typeof(RectTransform), typeof(UIRuntimeHost));
+            UIDisplay prefab = CreateDisplayPrefab("Canvas View", "canvas-view-test");
             prefab.gameObject.AddComponent<Canvas>();
             prefab.gameObject.AddComponent<CanvasScaler>();
             prefab.gameObject.AddComponent<GraphicRaycaster>();
 
             try
             {
-                EasyUIManager manager = managerObject.GetComponent<EasyUIRuntimeHost>().Manager;
-                EasyUIView view = manager.Open(prefab.gameObject);
+                UIManager manager = managerObject.GetComponent<UIRuntimeHost>().Manager;
+                UIView view = manager.Open(prefab.gameObject);
 
                 Assert.IsNull(view.Display.GetComponent<Canvas>());
                 Assert.IsNull(view.Display.GetComponent<CanvasScaler>());
@@ -196,9 +206,9 @@ namespace EasyFramework.Tests
         private static async Task PreloadAndOpenCore()
         {
             var modules = new ModuleManager();
-            var managerObject = new GameObject("UI Manager", typeof(RectTransform), typeof(EasyUIRuntimeHost));
-            EasyUIDisplay prefab = CreateDisplayPrefab("AsyncInventory", "async-inventory-test");
-            EasyUIManager ui = null;
+            var managerObject = new GameObject("UI Manager", typeof(RectTransform), typeof(UIRuntimeHost));
+            UIDisplay prefab = CreateDisplayPrefab("AsyncInventory", "async-inventory-test");
+            UIManager ui = null;
             try
             {
                 modules.Register<AssetModule>();
@@ -206,9 +216,9 @@ namespace EasyFramework.Tests
                 var loader = new UIPrefabLoader(prefab.gameObject);
                 AssetModule.Instance.SetLoader(loader);
                 Assert.IsTrue(await AssetModule.Instance.InitializeAsync());
-                ui = managerObject.GetComponent<EasyUIRuntimeHost>().Manager;
+                ui = managerObject.GetComponent<UIRuntimeHost>().Manager;
                 Assert.IsTrue(await ui.PreloadAsync("UI/AsyncInventory"));
-                TestView view = await ui.OpenAsync<TestView>("UI/AsyncInventory");
+                TestView view = await UIService.OpenAtAsync<TestView>("UI/AsyncInventory");
                 Assert.NotNull(view);
                 Assert.AreEqual(1, loader.LoadCalls);
                 Assert.IsTrue(ui.Close(view));
@@ -229,10 +239,10 @@ namespace EasyFramework.Tests
         [Test]
         public void Display_CreatesInheritedPureCSharpItem()
         {
-            var itemObject = new GameObject("Cost Item", typeof(RectTransform), typeof(EasyUIDisplay));
+            var itemObject = new GameObject("Cost Item", typeof(RectTransform), typeof(UIDisplay));
             try
             {
-                EasyUIDisplay display = itemObject.GetComponent<EasyUIDisplay>();
+                UIDisplay display = itemObject.GetComponent<UIDisplay>();
                 var serialized = new SerializedObject(display);
                 serialized.FindProperty("_managedAsView").boolValue = false;
                 serialized.ApplyModifiedPropertiesWithoutUndo();
@@ -253,15 +263,15 @@ namespace EasyFramework.Tests
         [Test]
         public void TypedView_IsBindingSource_AndOwnsItsLifecycle()
         {
-            var prefab = new GameObject("Stateful View", typeof(RectTransform), typeof(EasyUIDisplay));
-            var managerObject = new GameObject("UI Manager", typeof(RectTransform), typeof(EasyUIRuntimeHost));
+            var prefab = new GameObject("Stateful View", typeof(RectTransform), typeof(UIDisplay));
+            var managerObject = new GameObject("UI Manager", typeof(RectTransform), typeof(UIRuntimeHost));
             StatefulView view = null;
             try
             {
-                var display = prefab.GetComponent<EasyUIDisplay>();
+                var display = prefab.GetComponent<UIDisplay>();
                 display.SetViewScript(typeof(StatefulView).FullName, string.Empty, string.Empty);
 
-                view = managerObject.GetComponent<EasyUIRuntimeHost>().Manager
+                view = managerObject.GetComponent<UIRuntimeHost>().Manager
                     .Open<StatefulView>(prefab, 42);
 
                 Assert.AreSame(view, view.BindingSource);
@@ -280,10 +290,10 @@ namespace EasyFramework.Tests
         [Test]
         public void Binding_Get_UsesPrefabSerializedReference()
         {
-            var prefab = new GameObject("Reference View", typeof(RectTransform), typeof(EasyUIDisplay));
+            var prefab = new GameObject("Reference View", typeof(RectTransform), typeof(UIDisplay));
             var buttonObject = new GameObject("Close", typeof(RectTransform), typeof(Button));
             buttonObject.transform.SetParent(prefab.transform, false);
-            var marker = prefab.AddComponent<EasyUIReference>();
+            var marker = prefab.AddComponent<UIReference>();
             var serializedMarker = new SerializedObject(marker);
             SerializedProperty entries = serializedMarker.FindProperty("_entries");
             entries.arraySize = 1;
@@ -292,12 +302,12 @@ namespace EasyFramework.Tests
             entry.FindPropertyRelative("_target").objectReferenceValue = buttonObject.GetComponent<Button>();
             serializedMarker.ApplyModifiedPropertiesWithoutUndo();
 
-            var managerObject = new GameObject("UI Manager", typeof(RectTransform), typeof(EasyUIRuntimeHost));
+            var managerObject = new GameObject("UI Manager", typeof(RectTransform), typeof(UIRuntimeHost));
             try
             {
-                EasyUIDisplay display = prefab.GetComponent<EasyUIDisplay>();
+                UIDisplay display = prefab.GetComponent<UIDisplay>();
                 display.SetViewScript(typeof(TestView).FullName, string.Empty, string.Empty);
-                TestView view = managerObject.GetComponent<EasyUIRuntimeHost>().Manager.Open<TestView>(prefab);
+                TestView view = managerObject.GetComponent<UIRuntimeHost>().Manager.Open<TestView>(prefab);
 
                 Button resolved = view.Binding.Get<Button>("CloseButton");
                 Assert.NotNull(resolved);
@@ -313,14 +323,14 @@ namespace EasyFramework.Tests
         [Test]
         public void ModalDisplay_UsesOneSharedBlockingBackground()
         {
-            var managerObject = new GameObject("UI Manager", typeof(RectTransform), typeof(EasyUIRuntimeHost));
-            EasyUIDisplay prefab = CreateDisplayPrefab("Modal", "modal-test");
+            var managerObject = new GameObject("UI Manager", typeof(RectTransform), typeof(UIRuntimeHost));
+            UIDisplay prefab = CreateDisplayPrefab("Modal", "modal-test");
             try
             {
                 var serialized = new SerializedObject(prefab);
                 serialized.FindProperty("_backgroundMode").enumValueIndex = (int)UIBackgroundMode.Modal;
                 serialized.ApplyModifiedPropertiesWithoutUndo();
-                EasyUIManager manager = managerObject.GetComponent<EasyUIRuntimeHost>().Manager;
+                UIManager manager = managerObject.GetComponent<UIRuntimeHost>().Manager;
                 manager.Open(prefab.gameObject, layer: UILayer.Popup);
                 RectTransform layer = manager.GetLayerRoot(UILayer.Popup);
                 Transform background = layer.Find("[Background]");

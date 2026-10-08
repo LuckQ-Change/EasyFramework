@@ -10,7 +10,7 @@ namespace EasyFramework.Tests
 {
     public sealed class UIBindingTests
     {
-        public sealed class EditorBindingView : EasyUIView
+        public sealed class EditorBindingView : UIView
         {
             public ReactiveProperty<int> Level { get; } = new ReactiveProperty<int>(1);
         }
@@ -57,10 +57,10 @@ namespace EasyFramework.Tests
         }
 
         [Test]
-        public void EasyImage_CanSwitchSpriteByIndexWithoutStateController()
+        public void UIImage_CanSwitchSpriteByIndexWithoutStateController()
         {
-            var root = new GameObject("Image", typeof(RectTransform), typeof(CanvasRenderer), typeof(EasyImage));
-            var image = root.GetComponent<EasyImage>();
+            var root = new GameObject("Image", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIImage));
+            var image = root.GetComponent<UIImage>();
             var texture = new Texture2D(4, 2);
             var first = Sprite.Create(texture, new Rect(0, 0, 2, 2), Vector2.zero);
             var second = Sprite.Create(texture, new Rect(2, 0, 2, 2), Vector2.zero);
@@ -79,10 +79,10 @@ namespace EasyFramework.Tests
         [Test]
         public void EditorReflection_ResolvesAssemblyQualifiedManagedViewType()
         {
-            var root = new GameObject("Binding View", typeof(EasyUIDisplay), typeof(UIBindingContext));
+            var root = new GameObject("Binding View", typeof(UIDisplay), typeof(UIBindingContext));
             try
             {
-                root.GetComponent<EasyUIDisplay>().SetViewScript(
+                root.GetComponent<UIDisplay>().SetViewScript(
                     typeof(EditorBindingView).AssemblyQualifiedName,
                     string.Empty,
                     string.Empty);
