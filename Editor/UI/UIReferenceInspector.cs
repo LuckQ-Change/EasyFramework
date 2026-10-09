@@ -11,18 +11,26 @@ namespace EasyFramework.Editor.UI
     [CustomEditor(typeof(UIReference))]
     internal sealed class UIReferenceInspector : UnityEditor.Editor
     {
+        private const float EntryPadding = 6f;
+        private const float EntryLabelWidth = 82f;
+
         private SerializedProperty _entries;
         private ReorderableList _list;
+        private GUIStyle _completeStateStyle;
+        private GUIStyle _incompleteStateStyle;
 
         private void OnEnable()
         {
             _entries = serializedObject.FindProperty("_entries");
+            _completeStateStyle = CreateStateStyle(
+                EditorGUIUtility.isProSkin ? new Color(0.45f, 0.75f, 0.45f) : new Color(0.15f, 0.5f, 0.15f));
+            _incompleteStateStyle = CreateStateStyle(
+                EditorGUIUtility.isProSkin ? new Color(1f, 0.65f, 0.3f) : new Color(0.75f, 0.35f, 0.05f));
             _list = new ReorderableList(serializedObject, _entries, true, true, true, true)
             {
-                drawHeaderCallback = rect => EditorGUI.LabelField(rect, "组件引用"),
+                drawHeaderCallback = DrawHeader,
                 drawElementCallback = DrawEntry,
-                elementHeightCallback = _ =>
-                    EditorGUIUtility.singleLineHeight * 2f + EditorGUIUtility.standardVerticalSpacing * 3f,
+                elementHeightCallback = _ => GetEntryHeight(),
                 onAddCallback = list =>
                 {
                     int index = _entries.arraySize;
@@ -54,6 +62,11 @@ namespace EasyFramework.Editor.UI
             EditorGUILayout.EndHorizontal();
         }
 
+        private void DrawHeader(Rect rect)
+        {
+            EditorGUI.LabelField(rect, $"组件引用（{_entries.arraySize}）", EditorStyles.boldLabel);
+        }
+
         private void DrawEntry(Rect rect, int index, bool active, bool focused)
         {
             if (index < 0 || index >= _entries.arraySize) return;
@@ -64,22 +77,62 @@ namespace EasyFramework.Editor.UI
 
             float line = EditorGUIUtility.singleLineHeight;
             float spacing = EditorGUIUtility.standardVerticalSpacing;
-            rect.y += spacing;
-            float leftWidth = rect.width * 0.48f;
-            var keyRect = new Rect(rect.x, rect.y, leftWidth, line);
-            var targetRect = new Rect(rect.x + leftWidth + 6f, rect.y, rect.width - leftWidth - 6f, line);
-            EditorGUI.PropertyField(keyRect, key, new GUIContent("Key"));
+            rect = new Rect(
+                rect.x + EntryPadding,
+                rect.y + EntryPadding,
+                rect.width - EntryPadding * 2f,
+                rect.height - EntryPadding * 2f);
+
+            var titleRect = new Rect(rect.x, rect.y, rect.width, line);
+            bool isComplete = target.objectReferenceValue != null && !string.IsNullOrWhiteSpace(key.stringValue);
+            string state = isComplete ? "已完成" : "待补全";
+            EditorGUI.LabelField(titleRect, $"引用 {index + 1}", EditorStyles.boldLabel);
+            EditorGUI.LabelField(titleRect, state, isComplete ? _completeStateStyle : _incompleteStateStyle);
+
+            float y = titleRect.yMax + spacing;
+            var targetRect = new Rect(rect.x, y, rect.width, line);
 
             EditorGUI.BeginChangeCheck();
-            EditorGUI.PropertyField(targetRect, target, new GUIContent("Target"));
+            DrawPropertyField(targetRect, target, new GUIContent("组件"));
             if (EditorGUI.EndChangeCheck() && target.objectReferenceValue is Component component &&
                 string.IsNullOrWhiteSpace(key.stringValue))
             {
                 key.stringValue = MakeUniqueKey(component, index);
             }
 
-            var resourceRect = new Rect(rect.x, rect.y + line + spacing, rect.width, line);
-            EditorGUI.PropertyField(resourceRect, resource, new GUIContent("资源地址（可选）"));
+            y += line + spacing;
+            DrawPropertyField(new Rect(rect.x, y, rect.width, line), key, new GUIContent("Key"));
+
+            y += line + spacing;
+            DrawPropertyField(
+                new Rect(rect.x, y, rect.width, line),
+                resource,
+                new GUIContent("资源地址", "仅在该引用需要动态加载资源时填写。"));
+        }
+
+        private static float GetEntryHeight()
+        {
+            float line = EditorGUIUtility.singleLineHeight;
+            float spacing = EditorGUIUtility.standardVerticalSpacing;
+            return EntryPadding * 2f + line * 4f + spacing * 3f;
+        }
+
+        private static void DrawPropertyField(Rect rect, SerializedProperty property, GUIContent label)
+        {
+            float previousLabelWidth = EditorGUIUtility.labelWidth;
+            EditorGUIUtility.labelWidth = EntryLabelWidth;
+            EditorGUI.PropertyField(rect, property, label);
+            EditorGUIUtility.labelWidth = previousLabelWidth;
+        }
+
+        private static GUIStyle CreateStateStyle(Color color)
+        {
+            var style = new GUIStyle(EditorStyles.miniLabel)
+            {
+                alignment = TextAnchor.MiddleRight
+            };
+            style.normal.textColor = color;
+            return style;
         }
 
         private void DrawProblems()
