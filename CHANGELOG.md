@@ -11,7 +11,7 @@
 - `OpenDisplays` 改为只读视图，并补齐泛型 `TryGet` 与生成页面打开时的取消令牌传递。
 - 重做 UI 编辑体验：创建 Display 默认只需名称，资源地址自动跟随名称，目录支持选择并记忆，输入错误会在创建前提示。
 - `UIPrefab` 成为 View 资源地址的权威来源，Display 自动读取并同步该地址，避免 Prefab 与脚本配置漂移。
-- `UIReference` 使用紧凑列表编辑器，拖入 Target 后自动生成 Display 内唯一 Key，并即时提示空项和重复项。
+- `UIReference` 使用分组列表编辑器，组件、Key 与可选资源地址在窄 Inspector 中也能完整显示；拖入组件后自动生成 Display 内唯一 Key，并即时提示完成状态、空项和重复项。
 - 修复程序集限定 View 类型无法用于响应绑定成员下拉的问题；绑定格式增加编辑期校验，`bind_` 自动收集默认合并且覆盖前确认。
 - 新增统一的 `UI Editor` 组件转换窗口。只保留有实际扩展能力的 `Image ↔ UIImage` 转换；删除 Button、Text、Slider 等无行为包装组件。
 - Startup Config 与 Display Inspector 重新分组，UI Layer 改为 Unity Layer 下拉，低频字符串配置收进高级区域。
