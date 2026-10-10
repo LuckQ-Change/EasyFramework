@@ -33,6 +33,8 @@ namespace EasyFramework
             {
                 _activeConfig = FrameworkStartupConfig.Resolve(_startupConfig);
                 Runtime.Configure(_activeConfig.RuntimeMode);
+                if (_activeConfig.ShowDebugWindow && RuntimeDebugWindow.Instance == null)
+                    gameObject.AddComponent<RuntimeDebugWindow>();
                 Type startupProcedureType = _activeConfig.StartupProcedureType;
                 Entry.Init(modules =>
                 {
