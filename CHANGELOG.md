@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.3.1] - 2026-10-11
+
+### Fixed
+
+- 修复 Runtime 程序集未被场景引用时可能被 Unity 代码剥离，导致 Development Build 中 Debug 窗口不创建的问题。
+
 ## [0.3.0] - 2026-10-11
 
 ### Added

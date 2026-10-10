@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 
+[assembly: UnityEngine.Scripting.AlwaysLinkAssembly]
+
 namespace EasyFramework
 {
     /// <summary>在设备上查看 Unity 与框架日志的轻量调试窗口。</summary>
