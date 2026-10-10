@@ -1,6 +1,6 @@
 {
   "name": "com.wjq.easyframework",
-  "version": "0.3.1",
+  "version": "1.0.1",
   "displayName": "EasyFramework",
   "description": "一款轻量 Unity 游戏框架，提供确定的模块生命周期、事件、定时器、对象池，以及按需启用的网络、资源和热更适配。",
   "unity": "2022.3",
