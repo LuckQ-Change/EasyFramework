@@ -16,7 +16,8 @@ TimerModule.Instance.Delay(1f, () => Log.Info("hello"));
 可通过 `Assets/Create/EasyFramework/Startup Config` 创建自定义配置，并挂到场景中的
 `FrameworkLauncher`；自动创建 Launcher 时，也可以把配置保存为 `Resources/FrameworkStartupConfig.asset`。
 
-Development Build 中会出现 `DEBUG` 悬浮按钮，点击可查看设备日志、异常堆栈、FPS 和系统信息。
+Development Build 中会出现可拖动的 `DEBUGGER` FPS 悬浮框，点击可打开调试窗口。
+窗口提供 Console、Information、Profiler 和 Other 分组，可查看日志、异常堆栈、设备和性能信息。
 在 Startup Config 的“真机调试窗口”中选择 `Always` 可在正式包中启用，选择 `Disabled` 可关闭；
 没有 Launcher 的场景也会按 Resources 中的配置创建该窗口。日志只保留最近 500 条。
 

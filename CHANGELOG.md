@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.0.1] - 2026-10-11
+
+### Changed
+
+- 将真机 Debug 窗口改为更接近 Game Framework 的交互：可拖动的 FPS 悬浮框、Console / Information / Profiler / Other 分组页签、Fatal 日志分类、锁定滚动、设备与性能信息、窗口设置和常用操作。
+
 ## [0.3.1] - 2026-10-11
 
 ### Fixed
