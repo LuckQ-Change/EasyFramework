@@ -4,6 +4,13 @@ using UnityEngine;
 
 namespace EasyFramework
 {
+    public enum DebugWindowMode
+    {
+        DevelopmentBuild,
+        Always,
+        Disabled,
+    }
+
     /// <summary>供场景启动器和自动启动器共同使用的框架启动配置。</summary>
     [CreateAssetMenu(
         fileName = ResourceName,
@@ -39,6 +46,9 @@ namespace EasyFramework
         [Header("运行环境")]
         [SerializeField] private RuntimeMode _runtimeMode = RuntimeMode.Editor;
 
+        [Header("真机调试窗口")]
+        [SerializeField] private DebugWindowMode _debugWindowMode = DebugWindowMode.DevelopmentBuild;
+
         [Header("全局 Loading")]
         [SerializeField] private LoadingSettings _loading = new LoadingSettings();
 
@@ -54,6 +64,9 @@ namespace EasyFramework
         public float MatchWidthOrHeight => _matchWidthOrHeight;
         public GameObject BackgroundPrefab => _backgroundPrefab;
         public RuntimeMode RuntimeMode => _runtimeMode;
+        public DebugWindowMode ConfiguredDebugWindowMode => _debugWindowMode;
+        public bool ShowDebugWindow => _debugWindowMode == DebugWindowMode.Always ||
+                                       (_debugWindowMode == DebugWindowMode.DevelopmentBuild && Debug.isDebugBuild);
         public LoadingSettings Loading
         {
             get
