@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using EasyFramework.Tweening;
 
 namespace EasyFramework
 {
@@ -32,6 +33,10 @@ namespace EasyFramework
             _extraRegistrars.Clear();
         }
 
+        /// <summary>只移除指定注册器，避免演示场景关闭时清除项目的其他注册器。</summary>
+        public static bool RemoveRegistrar(Action<ModuleManager> registrar) =>
+            registrar != null && _extraRegistrars.Remove(registrar);
+
         public static void ApplyAll(ModuleManager modules)
         {
             if (modules == null) return;
@@ -48,6 +53,7 @@ namespace EasyFramework
             modules.Register<EventModule>();
             modules.Register<TimerModule>();
             modules.Register<PoolModule>();
+            modules.Register<TweenModule>();
         }
     }
 }
