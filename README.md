@@ -2,7 +2,7 @@
 
 EasyFramework 是面向 Unity 2022.3 LTS 的轻量游戏框架，采用单包、单 Runtime 程序集结构。
 
-默认提供事件、定时器和 C# 对象池；TCP、资源加载和 HybridCLR 热更能力保留在同一包内，由项目显式注册。框架关注生命周期、所有权和主线程派发，不试图替代成熟的资源、热更或协议库。
+默认提供事件、定时器、C# 对象池和 Tween；TCP、资源加载和 HybridCLR 热更能力保留在同一包内，由项目显式注册。框架关注生命周期、所有权和主线程派发，不试图替代成熟的资源、热更或协议库。
 
 ## 快速开始
 
@@ -37,6 +37,8 @@ private static void RegisterModules()
 ```
 
 完整 API 和生命周期说明见 [使用说明](doc/使用说明.md)，框架约束和测试要求见 [开发指南](doc/开发指南.md)。
+分阶段的职责审查、UI 编辑器与动画优化见 [开发优化计划](doc/开发优化计划.md)。
+Tween API 与播放语义见 [Tween 使用说明](doc/Tween使用说明.md)。
 
 UI 业务统一通过 `UIService` 打开、查找和关闭纯 C# View；Prefab 配置、Binding、页面栈与状态机由底层自动管理。详见 [UI 框架使用说明](doc/UI框架使用说明.md)。
 

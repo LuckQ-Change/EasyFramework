@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.1.0] - 2026-10-13
+
+### Added
+
+- 新增框架内置 Tween 内核，分别提供插值、Ease、Sequence、调度和生命周期控制；默认注册 TweenModule。
+- 新增分阶段开发优化计划，列明行为闭环、职责边界和验收标准。
+
+### Changed
+
+- UITransition 改为使用 Tween 内核，保留原有配置入口，并恢复页面的原始缩放。
+- UITransition 使用 Unity 对象判空语义检查 CanvasGroup，修复缺少该组件时的弹窗打开异常。
+- 修正 AssetModule 默认注册状态的文档描述。
+
 ## [1.0.1] - 2026-10-11
 
 ### Changed

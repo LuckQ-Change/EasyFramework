@@ -77,6 +77,23 @@ Binding 销毁时会自动释放它持有的资源 Lease。
 
 ## 4. 打开与关闭
 
+`OpenAsync` 使用 AssetModule 加载 Prefab。创建向导只负责生成 Prefab 和 View，不会自动注册资源模块或把 Prefab 放进 Loader。项目启动时先注册 AssetModule，在调用 `OpenAsync` 前设置 Loader 并等待初始化；Loader 中的地址必须与 View 的 `UIPrefab` 一致：
+
+```csharp
+// 在启动注册阶段执行一次：
+ModuleRegistry.AddRegistrar(modules => modules.Register<AssetModule>());
+
+// FrameworkLauncher 完成 Awake 后，以项目提供的 LoginView Prefab 初始化资源：
+var loader = new MemoryAssetLoader();
+loader.Add("UI/LoginView", loginPrefab);
+AssetModule.Instance.SetLoader(loader);
+await AssetModule.Instance.InitializeAsync();
+
+LoginView view = await UIService.OpenAsync<LoginView>();
+```
+
+如果项目使用 YooAsset，使用相同的地址规则配置其 Loader。编辑器中需要直接验证一个已有 Prefab 时，也可以调用 `UIService.Open<LoginView>(loginPrefab)`，它不经过 AssetModule。
+
 按生成脚本上的 `UIPrefab` 地址打开：
 
 ```csharp
