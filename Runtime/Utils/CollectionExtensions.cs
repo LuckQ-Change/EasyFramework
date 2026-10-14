@@ -3,6 +3,7 @@ using System.Collections.Generic;
 
 namespace EasyFramework
 {
+    /// <summary>提供不持有集合所有权的常用集合操作。</summary>
     public static class CollectionExtensions
     {
         private static readonly Random _rand = new Random();

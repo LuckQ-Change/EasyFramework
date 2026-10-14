@@ -1,5 +1,6 @@
 namespace EasyFramework.UI
 {
+    /// <summary>定义页面共享背景的显示策略。</summary>
     public enum UIBackgroundMode
     {
         None,
@@ -7,6 +8,7 @@ namespace EasyFramework.UI
         Modal,
     }
 
+    /// <summary>定义页面在框架 UI 栈中的排序层。</summary>
     public enum UILayer
     {
         Background = -200,

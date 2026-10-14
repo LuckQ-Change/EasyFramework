@@ -174,6 +174,29 @@ namespace EasyFramework.Tests
         }
 
         [Test]
+        public void TweenModule_ShutdownKillsActiveTweens_WithoutCompleting()
+        {
+            var modules = new ModuleManager();
+            modules.Register<TweenModule>();
+            modules.InitAll();
+            int completed = 0;
+            var tween = TweenFactory.To(0f, 1f, 1f, _ => { })
+                .OnComplete(() => completed++).Play();
+            try
+            {
+                Assert.AreEqual(1, TweenScheduler.ActiveCount);
+                modules.ShutdownAll();
+                Assert.IsTrue(tween.IsKilled);
+                Assert.AreEqual(0, completed);
+                Assert.AreEqual(0, TweenScheduler.ActiveCount);
+            }
+            finally
+            {
+                modules.ShutdownAll();
+            }
+        }
+
+        [Test]
         public void Tween_CallbackFailureDoesNotPreventFollowingCallbacks()
         {
             Action<string, Exception> previous = Log.ExceptionHandler;

@@ -22,6 +22,7 @@ namespace EasyFramework
         public string Reason;
     }
 
+    /// <summary>管理一个 TCP 连接代数的收发和取消；旧连接不能清理新连接。</summary>
     public class TcpNetClient
     {
         private sealed class ConnectionContext
@@ -75,13 +76,8 @@ namespace EasyFramework
             }
         }
 
-        internal int CurrentGeneration
-        {
-            get
-            {
-                lock (_stateLock) return _current?.Generation ?? 0;
-            }
-        }
+        // 连接关闭后仍需保留代数，才能识别排队中的旧连接控制事件。
+        internal int LatestGeneration => Volatile.Read(ref _generation);
 
         public Task<bool> ConnectAsync(string host, int port)
         {
@@ -327,6 +323,7 @@ namespace EasyFramework
             try { context.Cancellation?.Cancel(); } catch { }
             try { context.Stream?.Close(); } catch { }
             try { context.Tcp?.Close(); } catch { }
+            try { context.Cancellation?.Dispose(); } catch { }
         }
 
         private bool TryEnqueueMessage(NetEvent netEvent)

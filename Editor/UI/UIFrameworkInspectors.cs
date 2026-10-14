@@ -308,6 +308,8 @@ namespace EasyFramework.Editor.UI
                     ApplyState(controller, state);
             }
             EditorGUILayout.EndHorizontal();
+            if (!controller.IsPreviewing && GUILayout.Button("预览当前状态"))
+                ApplyState(controller, controller.SelectedState);
             if (statesChanged)
                 ApplyState(controller, controller.SelectedState);
 

@@ -97,6 +97,23 @@ namespace EasyFramework.Tests
         }
 
         [Test]
+        public void Pool_CallbackFailures_RemoveUnusableObjects()
+        {
+            var getPool = new ObjectPool<PooledItem>(
+                () => new PooledItem(), onGet: _ => throw new InvalidOperationException("get"));
+            Assert.Throws<InvalidOperationException>(() => getPool.Get());
+            Assert.AreEqual(0, getPool.CountAll);
+
+            var releasePool = new ObjectPool<PooledItem>(
+                () => new PooledItem(), onRelease: _ => throw new InvalidOperationException("release"));
+            PooledItem item = releasePool.Get();
+            Assert.Throws<InvalidOperationException>(() => releasePool.Release(item));
+            Assert.AreEqual(0, releasePool.CountAll);
+            Assert.AreEqual(0, releasePool.CountInactive);
+            Assert.Throws<InvalidOperationException>(() => releasePool.Release(item));
+        }
+
+        [Test]
         public void Timer_CanCancelTimerCreatedInsideCallback()
         {
             var manager = new ModuleManager();
@@ -115,6 +132,28 @@ namespace EasyFramework.Tests
 
             Assert.AreEqual(0, nestedCalls);
             manager.ShutdownAll();
+        }
+
+        [Test]
+        public void Timer_RejectsInvalidDelay_AndDoesNotReenterCurrentTick()
+        {
+            var manager = new ModuleManager();
+            manager.Register<TimerModule>();
+            manager.InitAll();
+            try
+            {
+                Assert.Throws<ArgumentOutOfRangeException>(() =>
+                    TimerModule.Instance.Delay(float.NaN, () => { }));
+                int calls = 0;
+                TimerModule.Instance.Loop(0f, () =>
+                {
+                    calls++;
+                    manager.Update(0f);
+                });
+                manager.Update(0f);
+                Assert.AreEqual(1, calls);
+            }
+            finally { manager.ShutdownAll(); }
         }
     }
 }

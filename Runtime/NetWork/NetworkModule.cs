@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 
 namespace EasyFramework
 {
+    /// <summary>限制网络事件队列并在主线程派发当前连接的事件。</summary>
     public class NetworkModule : ModuleSingleton<NetworkModule>
     {
         private readonly TcpNetClient _client = new TcpNetClient();
@@ -63,8 +64,7 @@ namespace EasyFramework
             int processed = 0;
             while (processed++ < budget && _client.TryDequeue(out var ev))
             {
-                if (ev.Type == NetEventType.Message &&
-                    ev.Generation != _client.CurrentGeneration) continue;
+                if (ev.Generation != _client.LatestGeneration) continue;
 
                 try
                 {

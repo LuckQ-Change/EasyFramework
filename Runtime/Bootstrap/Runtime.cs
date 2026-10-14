@@ -1,5 +1,6 @@
 namespace EasyFramework
 {
+    /// <summary>表示项目选择的运行环境类型。</summary>
     public enum RuntimeMode
     {
         Editor,

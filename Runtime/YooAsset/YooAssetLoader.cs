@@ -7,6 +7,7 @@ using YooAsset;
 
 namespace EasyFramework
 {
+    /// <summary>可选的 YooAsset 资源适配器；仅在安装包并启用编译宏后调用底层加载。</summary>
     public class YooAssetLoader : IAssetLoader
     {
         private readonly string _packageName;

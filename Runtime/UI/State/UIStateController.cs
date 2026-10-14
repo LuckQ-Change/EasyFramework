@@ -6,11 +6,13 @@ using UnityEngine.Events;
 namespace EasyFramework.UI
 {
     [Serializable]
+    /// <summary>将状态名变化作为 UnityEvent 暴露给场景。</summary>
     public sealed class UIStateChangedEvent : UnityEvent<string> { }
 
     [AddComponentMenu("EasyFramework/UI/State Controller")]
     [DisallowMultipleComponent]
     [DefaultExecutionOrder(-50)]
+    /// <summary>管理一组命名状态，并把当前状态应用到受控子节点。</summary>
     public sealed class UIStateController : MonoBehaviour
     {
         [SerializeField] private List<string> _states = new List<string> { "Normal", "Disabled" };
@@ -108,6 +110,15 @@ namespace EasyFramework.UI
         }
 
         public bool Preview(string state) => SetState(state);
+
+        /// <summary>Undo/Redo 后根据已序列化的选择重新应用预览，不派发运行时状态事件。</summary>
+        public void RefreshEditorPreviewAfterUndo()
+        {
+            if (Application.isPlaying) return;
+            _runtimeState = GetStateAt(_selectedIndex);
+            _editorPreview = true;
+            Refresh();
+        }
 
         public void RestoreSerializedAppearance()
         {

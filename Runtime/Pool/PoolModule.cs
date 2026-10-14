@@ -3,6 +3,7 @@ using System.Collections.Generic;
 
 namespace EasyFramework
 {
+    /// <summary>管理默认池和命名池；对象归属由对应 ObjectPool 保证。</summary>
     public class PoolModule : ModuleSingleton<PoolModule>
     {
         private readonly struct PoolKey : IEquatable<PoolKey>

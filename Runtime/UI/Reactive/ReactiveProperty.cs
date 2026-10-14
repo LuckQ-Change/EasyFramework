@@ -3,6 +3,7 @@ using System.Collections.Generic;
 
 namespace EasyFramework.UI
 {
+    /// <summary>只读观察值与变更通知的契约。</summary>
     public interface IReadOnlyReactiveProperty
     {
         Type ValueType { get; }
@@ -10,11 +11,13 @@ namespace EasyFramework.UI
         IDisposable Subscribe(Action<object> listener, bool notifyImmediately = true);
     }
 
+    /// <summary>允许写入的响应式属性契约。</summary>
     public interface IReactiveProperty : IReadOnlyReactiveProperty
     {
         bool TrySetValue(object value);
     }
 
+    /// <summary>在值变化时通知观察者，Dispose 后停止通知。</summary>
     public sealed class ReactiveProperty<T> : IReactiveProperty, IDisposable
     {
         private readonly List<Action<T>> _listeners = new List<Action<T>>();

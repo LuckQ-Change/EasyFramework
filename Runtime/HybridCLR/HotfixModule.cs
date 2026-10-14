@@ -4,6 +4,7 @@ using System.Reflection;
 
 namespace EasyFramework
 {
+    /// <summary>组织程序集加载和入口调用；只记录成功加载的程序集。</summary>
     public class HotfixModule : ModuleSingleton<HotfixModule>
     {
         private IHotfixLoader _loader;
@@ -38,6 +39,11 @@ namespace EasyFramework
             try
             {
                 var asm = _loader.LoadAssembly(dllBytes);
+                if (asm == null)
+                {
+                    Log.Error("[Hotfix] loader returned no assembly.");
+                    return null;
+                }
                 _loaded.Add(asm);
                 Log.Info($"[Hotfix] loaded {asm.GetName().Name}");
                 return asm;
@@ -65,22 +71,22 @@ namespace EasyFramework
                 Log.Error("[Hotfix] InvokeEntry: assembly is null");
                 return null;
             }
-            var type = asm.GetType(typeFullName);
-            if (type == null)
-            {
-                Log.Error($"[Hotfix] type not found: {typeFullName}");
-                return null;
-            }
-            var method = type.GetMethod(methodName,
-                BindingFlags.Public | BindingFlags.NonPublic |
-                BindingFlags.Static | BindingFlags.Instance);
-            if (method == null)
-            {
-                Log.Error($"[Hotfix] method not found: {typeFullName}.{methodName}");
-                return null;
-            }
             try
             {
+                var type = asm.GetType(typeFullName);
+                if (type == null)
+                {
+                    Log.Error($"[Hotfix] type not found: {typeFullName}");
+                    return null;
+                }
+                var method = type.GetMethod(methodName,
+                    BindingFlags.Public | BindingFlags.NonPublic |
+                    BindingFlags.Static | BindingFlags.Instance);
+                if (method == null)
+                {
+                    Log.Error($"[Hotfix] method not found: {typeFullName}.{methodName}");
+                    return null;
+                }
                 object target = method.IsStatic ? null : Activator.CreateInstance(type);
                 return method.Invoke(target, args);
             }

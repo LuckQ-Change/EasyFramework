@@ -9,6 +9,7 @@ namespace EasyFramework
         void Clear();
     }
 
+    /// <summary>复用单一类型对象，并拒绝外来或重复归还的实例。</summary>
     public class ObjectPool<T> : IObjectPool where T : class
     {
         private sealed class ReferenceComparer : IEqualityComparer<T>
@@ -70,9 +71,18 @@ namespace EasyFramework
                 item = CreateItem();
             }
 
-            _onGet?.Invoke(item);
-            (item as IPoolable)?.OnSpawn();
-            return item;
+            try
+            {
+                _onGet?.Invoke(item);
+                (item as IPoolable)?.OnSpawn();
+                return item;
+            }
+            catch
+            {
+                // 回调失败的对象状态未知；移出池所有权，避免下次 Get 复用半初始化对象。
+                DestroyItem(item);
+                throw;
+            }
         }
 
         public void Release(T item)
@@ -90,8 +100,16 @@ namespace EasyFramework
                 }
             }
 
-            (item as IPoolable)?.OnDespawn();
-            _onRelease?.Invoke(item);
+            try
+            {
+                (item as IPoolable)?.OnDespawn();
+                _onRelease?.Invoke(item);
+            }
+            catch
+            {
+                DestroyItem(item);
+                throw;
+            }
 
             if (_stack.Count >= _maxSize)
             {
@@ -138,6 +156,8 @@ namespace EasyFramework
         {
             var item = _factory();
             if (item == null) throw new InvalidOperationException("Pool factory returned null.");
+            if (_collectionCheck && _owned.Contains(item))
+                throw new InvalidOperationException("Pool factory returned an object already owned by this pool.");
             CountAll++;
             _owned?.Add(item);
             return item;

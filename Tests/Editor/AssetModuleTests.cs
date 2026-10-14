@@ -14,6 +14,7 @@ namespace EasyFramework.Tests
 
             public int LoadCalls { get; private set; }
             public int ReleaseCalls { get; private set; }
+            public int ReleaseAllCalls { get; private set; }
 
             public Task<bool> InitializeAsync() => Task.FromResult(true);
 
@@ -25,7 +26,7 @@ namespace EasyFramework.Tests
 
             public void Complete(object asset) => _completion.SetResult(asset);
             public void Release(string location) => ReleaseCalls++;
-            public void ReleaseAll() { }
+            public void ReleaseAll() => ReleaseAllCalls++;
         }
 
         [UnityTest]
@@ -63,6 +64,35 @@ namespace EasyFramework.Tests
             Assert.AreEqual(1, loader.ReleaseCalls);
 
             manager.ShutdownAll();
+        }
+
+        [UnityTest]
+        public IEnumerator ShutdownDuringSharedLoad_ReleasesLateAssetOnce()
+        {
+            Task task = ShutdownDuringSharedLoadCore();
+            while (!task.IsCompleted) yield return null;
+            if (task.IsFaulted) throw task.Exception.InnerException;
+        }
+
+        private static async Task ShutdownDuringSharedLoadCore()
+        {
+            var manager = new ModuleManager();
+            manager.Register<AssetModule>();
+            manager.InitAll();
+            var loader = new ControlledLoader();
+            AssetModule.Instance.SetLoader(loader);
+            Assert.IsTrue(await AssetModule.Instance.InitializeAsync());
+
+            Task<AssetLease<object>> first = AssetModule.Instance.AcquireAsync<object>("late");
+            Task<AssetLease<object>> second = AssetModule.Instance.AcquireAsync<object>("late");
+            Assert.AreEqual(1, loader.LoadCalls);
+            manager.ShutdownAll();
+            loader.Complete(new object());
+            Assert.IsNull(await first);
+            Assert.IsNull(await second);
+            for (int i = 0; i < 20 && loader.ReleaseCalls == 0; i++) await Task.Delay(10);
+            Assert.AreEqual(1, loader.ReleaseAllCalls);
+            Assert.AreEqual(1, loader.ReleaseCalls);
         }
     }
 }

@@ -4,6 +4,7 @@ using EasyFramework.Tweening;
 
 namespace EasyFramework
 {
+    /// <summary>注册默认模块及业务扩展；晚到注册作为完整批次安装。</summary>
     public static class ModuleRegistry
     {
         private static readonly List<Action<ModuleManager>> _extraRegistrars = new List<Action<ModuleManager>>();

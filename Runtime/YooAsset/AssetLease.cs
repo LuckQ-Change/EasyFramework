@@ -3,6 +3,7 @@ using System.Threading;
 
 namespace EasyFramework
 {
+    /// <summary>表示一次资源持有；Dispose 后不得继续使用该租约。</summary>
     public sealed class AssetLease<T> : IDisposable where T : class
     {
         private AssetModule _owner;

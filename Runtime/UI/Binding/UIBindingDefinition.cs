@@ -3,6 +3,7 @@ using UnityEngine;
 
 namespace EasyFramework.UI
 {
+    /// <summary>列出可绑定的 UGUI 属性类别。</summary>
     public enum UIBindingProperty
     {
         Text,
@@ -18,6 +19,7 @@ namespace EasyFramework.UI
     }
 
     [Serializable]
+    /// <summary>保存一个 UI 属性与业务值来源之间的序列化规则。</summary>
     public sealed class UIBindingDefinition
     {
         [SerializeField] private Component _target;

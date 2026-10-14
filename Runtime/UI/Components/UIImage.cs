@@ -5,6 +5,7 @@ using UnityEngine.UI;
 namespace EasyFramework.UI
 {
     [AddComponentMenu("EasyFramework/UI/Image")]
+    /// <summary>扩展 UGUI Image，以索引选择序列化的 Sprite。</summary>
     public class UIImage : Image, IUIComponent
     {
         [SerializeField] private List<Sprite> _sprites = new List<Sprite>();

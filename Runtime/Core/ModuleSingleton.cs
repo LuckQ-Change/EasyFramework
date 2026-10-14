@@ -2,6 +2,7 @@ using System;
 
 namespace EasyFramework
 {
+    /// <summary>把模块实例的建立与清理接到 IModule 生命周期。</summary>
     public abstract class ModuleSingletonBase : IModule
     {
         internal abstract void RegisterInstance();
@@ -21,6 +22,7 @@ namespace EasyFramework
         protected virtual void OnShutdown() { }
     }
 
+    /// <summary>为一种模块类型提供由 Manager 管理的静态 Instance。</summary>
     public abstract class ModuleSingleton<T> : ModuleSingletonBase
         where T : ModuleSingleton<T>, new()
     {

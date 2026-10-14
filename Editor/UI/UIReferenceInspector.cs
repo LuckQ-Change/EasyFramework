@@ -22,10 +22,6 @@ namespace EasyFramework.Editor.UI
         private void OnEnable()
         {
             _entries = serializedObject.FindProperty("_entries");
-            _completeStateStyle = CreateStateStyle(
-                EditorGUIUtility.isProSkin ? new Color(0.45f, 0.75f, 0.45f) : new Color(0.15f, 0.5f, 0.15f));
-            _incompleteStateStyle = CreateStateStyle(
-                EditorGUIUtility.isProSkin ? new Color(1f, 0.65f, 0.3f) : new Color(0.75f, 0.35f, 0.05f));
             _list = new ReorderableList(serializedObject, _entries, true, true, true, true)
             {
                 drawHeaderCallback = DrawHeader,
@@ -46,6 +42,13 @@ namespace EasyFramework.Editor.UI
 
         public override void OnInspectorGUI()
         {
+            if (_completeStateStyle == null)
+            {
+                _completeStateStyle = CreateStateStyle(EditorGUIUtility.isProSkin
+                    ? new Color(0.45f, 0.75f, 0.45f) : new Color(0.15f, 0.5f, 0.15f));
+                _incompleteStateStyle = CreateStateStyle(EditorGUIUtility.isProSkin
+                    ? new Color(1f, 0.65f, 0.3f) : new Color(0.75f, 0.35f, 0.05f));
+            }
             serializedObject.Update();
             EditorGUILayout.LabelField("UI Reference", new GUIStyle(EditorStyles.boldLabel) { fontSize = 14 });
             EditorGUILayout.LabelField(

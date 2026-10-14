@@ -3,6 +3,7 @@ using System.Collections.Generic;
 
 namespace EasyFramework.UI
 {
+    /// <summary>统一释放一组订阅或资源句柄。</summary>
     public sealed class CompositeDisposable : IDisposable
     {
         private readonly List<IDisposable> _items = new List<IDisposable>();

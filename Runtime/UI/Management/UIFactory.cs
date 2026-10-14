@@ -3,6 +3,7 @@ using System.Reflection;
 
 namespace EasyFramework.UI
 {
+    /// <summary>从 UIDisplay 创建 View 与绑定，不管理页面栈。</summary>
     public static class UIFactory
     {
         public static bool TryGetPrefabLocation<TLogic>(out string location)

@@ -6,6 +6,7 @@ namespace EasyFramework
 {
     [DefaultExecutionOrder(-1000)]
     [DisallowMultipleComponent]
+    /// <summary>将 Unity 场景生命周期接到框架启动与关闭。</summary>
     public class FrameworkLauncher : MonoBehaviour
     {
         private static FrameworkLauncher _instance;
