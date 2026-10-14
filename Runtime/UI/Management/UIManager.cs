@@ -464,6 +464,7 @@ namespace EasyFramework.UI
             if (!display.gameObject.activeSelf) display.gameObject.SetActive(true);
             display.OpenInternal(args);
             BringToFront(display);
+            display.GetComponent<UITransition>()?.PlayOpen();
             return display;
         }
 

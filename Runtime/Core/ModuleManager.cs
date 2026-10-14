@@ -3,6 +3,7 @@ using System.Collections.Generic;
 
 namespace EasyFramework
 {
+    /// <summary>按注册顺序更新模块，并在失败或关闭时逆序回滚。</summary>
     public class ModuleManager
     {
         private readonly Dictionary<Type, IModule> _modules = new Dictionary<Type, IModule>();

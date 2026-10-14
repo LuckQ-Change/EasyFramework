@@ -18,6 +18,52 @@ namespace EasyFramework.Tests
             if (task.IsFaulted) throw task.Exception.InnerException;
         }
 
+        [UnityTest]
+        public IEnumerator Reconnect_DropsQueuedEventsFromPreviousConnection()
+        {
+            Task task = ReconnectCore();
+            while (!task.IsCompleted) yield return null;
+            if (task.IsFaulted) throw task.Exception.InnerException;
+        }
+
+        private static async Task ReconnectCore()
+        {
+            var listener = new TcpListener(IPAddress.Loopback, 0);
+            var manager = new ModuleManager();
+            listener.Start();
+            try
+            {
+                manager.Register<NetworkModule>();
+                manager.InitAll();
+                int connectedCalls = 0;
+                int disconnectedCalls = 0;
+                NetworkModule.Instance.OnConnected += () => connectedCalls++;
+                NetworkModule.Instance.OnDisconnected += _ => disconnectedCalls++;
+                int port = ((IPEndPoint)listener.LocalEndpoint).Port;
+
+                var firstAccept = listener.AcceptTcpClientAsync();
+                Assert.IsTrue(await NetworkModule.Instance.ConnectAsync("127.0.0.1", port));
+                using (var firstServer = await firstAccept)
+                {
+                    NetworkModule.Instance.Disconnect();
+                    var secondAccept = listener.AcceptTcpClientAsync();
+                    Assert.IsTrue(await NetworkModule.Instance.ConnectAsync("127.0.0.1", port));
+                    using (var secondServer = await secondAccept)
+                    {
+                        manager.Update(0f);
+                        Assert.AreEqual(1, connectedCalls);
+                        Assert.AreEqual(0, disconnectedCalls);
+                        Assert.IsTrue(NetworkModule.Instance.IsConnected);
+                    }
+                }
+            }
+            finally
+            {
+                manager.ShutdownAll();
+                listener.Stop();
+            }
+        }
+
         private static async Task LoopbackCore()
         {
             var listener = new TcpListener(IPAddress.Loopback, 0);
@@ -49,7 +95,11 @@ namespace EasyFramework.Tests
                         sentFrame);
 
                     byte[] incomingFrame = { 0, 0, 0, 6, 0, 0, 7, 210, 9, 8 };
-                    await server.GetStream().WriteAsync(incomingFrame, 0, incomingFrame.Length);
+                    await server.GetStream().WriteAsync(incomingFrame, 0, 5);
+                    await Task.Delay(20);
+                    manager.Update(0f);
+                    Assert.IsNull(received, "半包尚未到齐时不能派发消息。");
+                    await server.GetStream().WriteAsync(incomingFrame, 5, incomingFrame.Length - 5);
 
                     for (int i = 0; i < 100 && received == null; i++)
                     {

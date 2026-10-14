@@ -4,6 +4,7 @@ using HybridCLR;
 
 namespace EasyFramework
 {
+    /// <summary>可选 HybridCLR 适配器；需要目标项目提供对应包与宏。</summary>
     public class HybridCLRLoader : IHotfixLoader
     {
         private readonly HomologousImageMode _mode;

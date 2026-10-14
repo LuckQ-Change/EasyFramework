@@ -4,6 +4,7 @@ using System.IO;
 using System.Text;
 using EasyFramework.UI;
 using UnityEditor;
+using UnityEditor.SceneManagement;
 using UnityEngine;
 
 namespace EasyFramework.Editor.UI
@@ -41,6 +42,15 @@ namespace EasyFramework.Editor.UI
         {
             var window = GetWindow<UICreationWizard>(true, "Create UI Display");
             window.minSize = new Vector2(460f, 310f);
+        }
+
+        internal static void OpenItemTemplate()
+        {
+            var window = GetWindow<UICreationWizard>(true, "Create UI Item");
+            window._displayName = "NewItem";
+            window._managedAsView = false;
+            window.minSize = new Vector2(460f, 310f);
+            window.Show();
         }
 
         private void OnEnable()
@@ -155,28 +165,16 @@ namespace EasyFramework.Editor.UI
         private void Create()
         {
             string prefabPath = GetPrefabPath();
-            GameObject root = null;
-            bool createdPrefab = false;
+            bool completed = false;
             try
             {
-                Directory.CreateDirectory(Path.GetFullPath(_prefabFolder));
-                AssetDatabase.Refresh();
-                root = new GameObject(_displayName.Trim(), typeof(RectTransform), typeof(UIDisplay));
-                ((RectTransform)root.transform).sizeDelta = new Vector2(800f, 600f);
-                var serialized = new SerializedObject(root.GetComponent<UIDisplay>());
-                serialized.FindProperty("_managedAsView").boolValue = _managedAsView;
-                serialized.ApplyModifiedPropertiesWithoutUndo();
-
-                GameObject prefab = PrefabUtility.SaveAsPrefabAsset(root, prefabPath);
-                if (prefab == null) throw new InvalidOperationException("Unity 未能创建 Prefab，请检查目标目录。");
-                createdPrefab = true;
-                UIDisplay display = prefab.GetComponent<UIDisplay>();
-                UIScriptGenerator.Generate(
-                    display,
+                GameObject prefab = CreateAssets(
+                    prefabPath,
                     _displayName.Trim(),
                     _namespaceName,
                     _managedAsView ? EffectiveLocation : string.Empty,
-                    _scriptFolder);
+                    _scriptFolder,
+                    _managedAsView);
 
                 EditorPrefs.SetString(PrefabFolderPref, _prefabFolder);
                 EditorPrefs.SetString(NamespacePref, _namespaceName);
@@ -184,12 +182,53 @@ namespace EasyFramework.Editor.UI
                 Selection.activeObject = prefab;
                 EditorGUIUtility.PingObject(prefab);
                 Close();
+                completed = true;
             }
             catch (Exception exception)
             {
-                if (createdPrefab) AssetDatabase.DeleteAsset(prefabPath);
                 Debug.LogException(exception);
                 EditorUtility.DisplayDialog("UI 创建失败", exception.Message, "确定");
+            }
+            if (completed && !Application.isBatchMode)
+            {
+                try
+                {
+                    PrefabStageUtility.OpenPrefab(prefabPath);
+                }
+                catch (Exception exception)
+                {
+                    Debug.LogException(exception);
+                    EditorUtility.DisplayDialog("UI", "页面已创建，但未能自动打开 Prefab。可在 Project 中双击它继续编辑。", "确定");
+                }
+            }
+        }
+
+        internal static GameObject CreateAssets(string prefabPath, string displayName,
+            string namespaceName, string prefabLocation, string scriptFolder, bool managedAsView)
+        {
+            GameObject root = null;
+            bool createdPrefab = false;
+            try
+            {
+                Directory.CreateDirectory(Path.GetFullPath(Path.GetDirectoryName(prefabPath)));
+                AssetDatabase.Refresh();
+                root = new GameObject(displayName, typeof(RectTransform), typeof(UIDisplay));
+                ((RectTransform)root.transform).sizeDelta = new Vector2(800f, 600f);
+                var serialized = new SerializedObject(root.GetComponent<UIDisplay>());
+                serialized.FindProperty("_managedAsView").boolValue = managedAsView;
+                serialized.ApplyModifiedPropertiesWithoutUndo();
+
+                GameObject prefab = PrefabUtility.SaveAsPrefabAsset(root, prefabPath);
+                if (prefab == null) throw new InvalidOperationException("Unity 未能创建 Prefab，请检查目标目录。");
+                createdPrefab = true;
+                UIScriptGenerator.Generate(prefab.GetComponent<UIDisplay>(),
+                    displayName, namespaceName, prefabLocation, scriptFolder);
+                return prefab;
+            }
+            catch
+            {
+                if (createdPrefab) AssetDatabase.DeleteAsset(prefabPath);
+                throw;
             }
             finally
             {

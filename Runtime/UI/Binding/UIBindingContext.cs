@@ -9,6 +9,7 @@ namespace EasyFramework.UI
 {
     [AddComponentMenu("EasyFramework/UI/Binding Context")]
     [DisallowMultipleComponent]
+    /// <summary>把绑定定义挂到真实 UI 节点并管理其生命周期。</summary>
     public sealed class UIBindingContext : MonoBehaviour
     {
         [SerializeField] private UnityEngine.Object _source;

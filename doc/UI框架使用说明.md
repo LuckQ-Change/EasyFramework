@@ -175,10 +175,13 @@ await LoadingModule.Instance.RunAsync(
 
 页面里直接用 Unity 自带的 Image、Button、Text 即可。`UIReference`、状态机和 Binding 都不要求先换成框架组件。
 
+`Tools/EasyFramework/UI/UI Editor` 是页面工作台。选中 Prefab 或其子节点后，可在“页面、引用、状态、适配、动画、校验”间切换；校验页中的“定位”会选中并高亮需要修复的组件。
+从工作台点击“创建页面 / Item”，向导创建成功后会自动打开 Prefab Mode。状态页可在页面根节点添加 `UIStateController`；选中其下的节点后，可添加 `UIElement` 并记录状态外观。
+
 只有需要 **Sprite 列表 / 按索引切图** 时，才把 Image 换成 `UIImage`：
 
 - Inspector 标题栏：仅 Image / UIImage 显示切换按钮
-- `Tools/EasyFramework/UI/UI Editor`：集中扫描、转换和还原选中层级
+- `Tools/EasyFramework/UI/UI Editor` → `组件转换`：集中扫描、转换和还原选中层级
 - Image / UIImage 组件右键菜单：在两者之间转换
 
 框架不再提供没有额外行为的 Button、Text、Slider 等包装类型；这些组件直接使用原生 UGUI。唯一保留的扩展组件是提供 Sprite 列表能力的 `UIImage`。
@@ -193,8 +196,20 @@ await LoadingModule.Instance.RunAsync(
 
 1. 在 Controller 的状态列表里添加任意多个状态（如 Normal、Hover、Disabled），并指定当前状态
 2. 点状态名，子节点会立刻切换到该状态
-3. 在 Scene / Inspector 里改颜色、图片、显隐
-4. 点“将当前外观记录到当前状态”
+3. 在 Scene / Inspector 里改颜色、图片、显隐；编辑器会自动记录受控属性，工作台以标记提示变化
+4. 若需显式记录或恢复，可使用工作台对应操作；切换状态时未记录的变化会提示记录、丢弃或取消
 5. 保存 Prefab 时会先写入默认外观，随后仍回到当前状态，避免把预览结果存进资源
 
 未勾选的属性沿用默认外观。工作台 `Tools/EasyFramework/UI/State Workbench` 用来按“状态 × 节点”查看和记录。不同分组可以把 Controller 挂在不同父节点上，子节点会跟随最近的父级 Controller。
+
+## 8. 引用 Key、适配与时间轴
+
+选中页面下的组件，在工作台“引用”页点击一键暴露，生成的 Key 只在最近的 `UIDisplay` 内有效。点击“生成 Key 常量”会在 View 脚本同目录创建 `*Keys.g.cs`，业务脚本可用这些常量访问引用。Key 改名后再次生成会列出旧常量的业务使用点；先修复使用点再提交。未绑定目标或重复 Key 在校验页报错。
+
+“适配”页提供 Anchor 与 Layout 预设、安全区组件以及常见分辨率轮廓预览。预览只读 Prefab，计算 Anchor、Pivot、Size Delta 和位置；`LayoutGroup` 的实际排列仍在 Game 视图检查。`UISafeArea` 只在运行时把选中的边映射到 `Screen.safeArea`。
+
+Item 模板通过“创建页面 / Item”向导选择“嵌套组件 Item”。Item 内的引用可以复用页面中已有的 Key；页面绑定只读取属于自己 `UIDisplay` 作用域的引用。长列表虚拟化应在有明确数据量、复用和滚动性能需求的业务列表中实现。
+
+演示场景中的 `WorkbenchListItem.prefab` 与 `UIVirtualList` 展示 80 条逻辑数据的可见行复用。列表只实例化视口范围内的 Item，滚动时重绑行号；页面禁用时移除滚动监听并销毁实例。大数据量列表应使用相同模式，并在具体业务中测量 Item 复杂度与滚动帧率。
+
+在节点添加 `UITimeline` 后，添加颜色、锚点位置、缩放或透明度片段，设置起点、时长、缓动及始末值。“动画”页打开 `Tween Timeline`，拖动进度可调用运行时同一 `TweenSequence.Seek`。退出预览、保存 Prefab、撤销或进入 Play Mode 都会恢复原始外观；运行时调用 `Play()`，关闭页面前调用 `Stop()`。

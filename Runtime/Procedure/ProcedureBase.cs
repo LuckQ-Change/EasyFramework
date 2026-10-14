@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 
 namespace EasyFramework
 {
+    /// <summary>由项目实现的流程基类；进入和退出由 ProcedureModule 调度。</summary>
     public abstract class ProcedureBase
     {
         public ProcedureContext Context { get; private set; }

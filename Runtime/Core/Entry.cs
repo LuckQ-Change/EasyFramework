@@ -2,6 +2,7 @@ using System;
 
 namespace EasyFramework
 {
+    /// <summary>提供框架启动、模块安装、逐帧更新和关闭的公共入口。</summary>
     public static class Entry
     {
         public static ModuleManager Modules { get; private set; }

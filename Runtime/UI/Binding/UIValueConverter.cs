@@ -3,6 +3,7 @@ using System.Globalization;
 
 namespace EasyFramework.UI
 {
+    /// <summary>转换 UI 绑定值；不保存绑定状态。</summary>
     public static class UIValueConverter
     {
         public static bool TryConvert(object value, Type destinationType, out object converted)

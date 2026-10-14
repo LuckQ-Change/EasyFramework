@@ -6,6 +6,7 @@ using UnityEngine.EventSystems;
 
 namespace EasyFramework.UI
 {
+    /// <summary>选择框架 UI 根 Canvas 的渲染方式。</summary>
     public enum UIRenderMode
     {
         ScreenSpaceOverlay,

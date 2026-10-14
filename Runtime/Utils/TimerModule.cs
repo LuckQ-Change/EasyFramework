@@ -3,6 +3,7 @@ using System.Collections.Generic;
 
 namespace EasyFramework
 {
+    /// <summary>按模块 Update 推进延迟与循环回调；回调中新增任务下一帧才生效。</summary>
     public class TimerModule : ModuleSingleton<TimerModule>
     {
         private class TimerHandle
@@ -23,6 +24,8 @@ namespace EasyFramework
         public int Schedule(float delay, Action callback, bool repeat = false)
         {
             if (callback == null) return 0;
+            if (float.IsNaN(delay) || float.IsInfinity(delay))
+                throw new ArgumentOutOfRangeException(nameof(delay));
             if (delay < 0f) delay = 0f;
 
             var handle = new TimerHandle
@@ -75,43 +78,36 @@ namespace EasyFramework
 
         protected override void OnUpdate(float deltaTime)
         {
+            if (_ticking) return;
             _ticking = true;
-            for (int i = 0; i < _timers.Count; i++)
+            try
             {
-                var t = _timers[i];
-                if (t.Canceled) continue;
+                for (int i = 0; i < _timers.Count; i++)
+                {
+                    var t = _timers[i];
+                    if (t.Canceled) continue;
 
-                t.Elapsed += deltaTime;
-                if (t.Elapsed < t.Interval) continue;
+                    t.Elapsed += deltaTime;
+                    if (t.Elapsed < t.Interval) continue;
 
-                try
-                {
-                    t.Callback();
-                }
-                catch (Exception ex)
-                {
-                    Log.Error("[Timer] callback error.", ex);
-                }
+                    try { t.Callback(); }
+                    catch (Exception ex) { Log.Error("[Timer] callback error.", ex); }
 
-                if (t.Repeat)
-                {
-                    t.Elapsed -= t.Interval;
-                }
-                else
-                {
-                    t.Canceled = true;
+                    if (t.Repeat) t.Elapsed -= t.Interval;
+                    else t.Canceled = true;
                 }
             }
-            _ticking = false;
-
-            while (_pending.Count > 0)
+            finally
             {
-                _timers.Add(_pending.Dequeue());
-            }
-
-            for (int i = _timers.Count - 1; i >= 0; i--)
-            {
-                if (_timers[i].Canceled) _timers.RemoveAt(i);
+                _ticking = false;
+                while (_pending.Count > 0)
+                {
+                    _timers.Add(_pending.Dequeue());
+                }
+                for (int i = _timers.Count - 1; i >= 0; i--)
+                {
+                    if (_timers[i].Canceled) _timers.RemoveAt(i);
+                }
             }
         }
 

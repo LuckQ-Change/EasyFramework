@@ -42,6 +42,7 @@ namespace EasyFramework
 
         private readonly SemaphoreSlim _operationGate = new SemaphoreSlim(1, 1);
         private int _scopeCount;
+        private bool _shuttingDown;
 
         public bool IsLoading { get; private set; }
         public float Progress { get; private set; }
@@ -54,6 +55,7 @@ namespace EasyFramework
 
         public IDisposable Begin(string message = "加载中")
         {
+            if (_shuttingDown) throw new InvalidOperationException("LoadingModule is shutting down.");
             bool startsNewSession = _scopeCount == 0;
             _scopeCount++;
             if (startsNewSession)
@@ -70,12 +72,16 @@ namespace EasyFramework
 
         public void Report(float progress)
         {
+            if (_shuttingDown) return;
+            if (float.IsNaN(progress) || float.IsInfinity(progress))
+                throw new ArgumentOutOfRangeException(nameof(progress));
             Progress = progress < 0f ? 0f : progress > 1f ? 1f : progress;
             Notify();
         }
 
         public void SetMessage(string message)
         {
+            if (_shuttingDown) return;
             Message = message ?? string.Empty;
             Notify();
         }
@@ -114,15 +120,19 @@ namespace EasyFramework
                     throw new InvalidOperationException($"Unity could not start loading scene '{sceneName}'.");
                 while (!operation.isDone)
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
                     progress.Report(operation.progress / 0.9f);
                     await Task.Yield();
                 }
                 progress.Report(1f);
-            }, CancellationToken.None);
+            }, cancellationToken);
         }
+
+        protected override void OnInit() => _shuttingDown = false;
 
         protected override void OnShutdown()
         {
+            _shuttingDown = true;
             _scopeCount = 0;
             IsLoading = false;
             Progress = 0f;
@@ -143,6 +153,7 @@ namespace EasyFramework
 
         private void End()
         {
+            if (_shuttingDown) return;
             if (_scopeCount <= 0) return;
             _scopeCount--;
             if (_scopeCount > 0) return;
@@ -151,6 +162,16 @@ namespace EasyFramework
             Notify();
         }
 
-        private void Notify() => Changed?.Invoke(State);
+        private void Notify()
+        {
+            Action<LoadingState> handlers = Changed;
+            if (handlers == null) return;
+            LoadingState state = State;
+            foreach (Delegate handler in handlers.GetInvocationList())
+            {
+                try { ((Action<LoadingState>)handler)(state); }
+                catch (Exception exception) { Log.Error("[Loading] state listener failed.", exception); }
+            }
+        }
     }
 }

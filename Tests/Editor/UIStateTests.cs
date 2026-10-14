@@ -8,6 +8,69 @@ namespace EasyFramework.Tests
     public sealed class UIStateTests
     {
         [Test]
+        public void ResetVariant_RestoresDefaultWithoutChangingOtherState()
+        {
+            var root = new GameObject("State Root", typeof(RectTransform), typeof(UIStateController));
+            var child = new GameObject("Image", typeof(RectTransform), typeof(CanvasRenderer),
+                typeof(Image), typeof(UIElement));
+            child.transform.SetParent(root.transform, false);
+            try
+            {
+                var controller = root.GetComponent<UIStateController>();
+                var element = child.GetComponent<UIElement>();
+                var image = child.GetComponent<Image>();
+                element.Controller = controller;
+                image.color = Color.white;
+                element.CaptureDefault();
+                image.color = Color.blue;
+                Assert.AreEqual(UIStateProperty.Color, element.GetModifiedProperties("Disabled"));
+                element.CaptureModifiedProperties("Disabled");
+                image.color = Color.red;
+                element.CaptureModifiedProperties("Normal");
+
+                Assert.IsTrue(element.ResetVariant("Disabled"));
+                element.ApplyState("Disabled");
+                Assert.AreEqual(Color.white, image.color);
+                element.ApplyState("Normal");
+                Assert.AreEqual(Color.red, image.color);
+            }
+            finally
+            {
+                Object.DestroyImmediate(root);
+            }
+        }
+
+        [Test]
+        public void CaptureModifiedProperties_RecordsOnlyEditedColor_AndClearsRestoredOverride()
+        {
+            var root = new GameObject("State Root", typeof(RectTransform), typeof(UIStateController));
+            var child = new GameObject("Image", typeof(RectTransform), typeof(CanvasRenderer),
+                typeof(Image), typeof(UIElement));
+            child.transform.SetParent(root.transform, false);
+            try
+            {
+                var element = child.GetComponent<UIElement>();
+                var image = child.GetComponent<Image>();
+                element.Controller = root.GetComponent<UIStateController>();
+                image.color = Color.white;
+                element.CaptureDefault();
+
+                image.color = Color.blue;
+                Assert.IsTrue(element.CaptureModifiedProperties("Disabled"));
+                Assert.AreEqual(UIStateProperty.Color, element.FindVariant("Disabled").Properties);
+                Assert.AreEqual(Color.blue, element.FindVariant("Disabled").Color);
+
+                image.color = Color.white;
+                Assert.IsTrue(element.CaptureModifiedProperties("Disabled"));
+                Assert.AreEqual(UIStateProperty.None, element.FindVariant("Disabled").Properties);
+            }
+            finally
+            {
+                Object.DestroyImmediate(root);
+            }
+        }
+
+        [Test]
         public void SetState_UpdatesSelectedIndex_AndAppliesChild()
         {
             var root = new GameObject("State Root", typeof(RectTransform), typeof(UIStateController));

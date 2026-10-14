@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 
 namespace EasyFramework
 {
+    /// <summary>串行切换业务流程，并在接受上下文后负责其释放。</summary>
     public sealed class ProcedureModule : ModuleSingleton<ProcedureModule>
     {
         private readonly Dictionary<Type, ProcedureBase> _procedures =
@@ -71,6 +72,7 @@ namespace EasyFramework
                 throw new InvalidOperationException("流程已经启动，不能重复启动。");
             if (procedureType == null) throw new ArgumentNullException(nameof(procedureType));
             if (context == null) throw new ArgumentNullException(nameof(context));
+            cancellationToken.ThrowIfCancellationRequested();
             Register(procedureType);
             _context = context;
             return ChangeAsync(procedureType, cancellationToken);

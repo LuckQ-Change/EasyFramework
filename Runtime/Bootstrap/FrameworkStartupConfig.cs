@@ -4,6 +4,7 @@ using UnityEngine;
 
 namespace EasyFramework
 {
+    /// <summary>控制运行时调试窗口在构建中的启用条件。</summary>
     public enum DebugWindowMode
     {
         DevelopmentBuild,
@@ -16,6 +17,7 @@ namespace EasyFramework
         fileName = ResourceName,
         menuName = "EasyFramework/Startup Config",
         order = 1)]
+    /// <summary>保存启动配置；项目资产决定 UI、运行模式及可选流程设置。</summary>
     public sealed class FrameworkStartupConfig : ScriptableObject
     {
         public const string ResourceName = "FrameworkStartupConfig";

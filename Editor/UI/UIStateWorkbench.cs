@@ -43,6 +43,11 @@ namespace EasyFramework.Editor.UI
             EditorGUILayout.BeginHorizontal();
             if (GUILayout.Button("将当前外观记录到当前状态"))
                 RecordCurrent();
+            using (new EditorGUI.DisabledScope(!(Selection.activeGameObject != null &&
+                Selection.activeGameObject.GetComponent<UIElement>()?.BelongsTo(_controller) == true)))
+            {
+                if (GUILayout.Button("恢复选中节点的默认外观")) ResetSelected();
+            }
             if (GUILayout.Button("同步子节点变体"))
             {
                 Undo.RecordObjects(_controller.GetComponentsInChildren<UIElement>(true), "Sync UI variants");
@@ -75,7 +80,10 @@ namespace EasyFramework.Editor.UI
                     UIStateVariant variant = element.FindVariant(state);
                     string value = variant == null || variant.Properties == UIStateProperty.None
                         ? "默认"
-                        : ShortProperties(variant.Properties);
+                        : "● " + ShortProperties(variant.Properties);
+                    if (_controller.IsPreviewing && state == _controller.SelectedState &&
+                        element.GetModifiedProperties(state) != UIStateProperty.None)
+                        value += " *";
                     if (GUILayout.Button(value, EditorStyles.miniLabel, GUILayout.Width(90f)))
                     {
                         Selection.activeObject = element;
@@ -100,13 +108,30 @@ namespace EasyFramework.Editor.UI
                     ApplyState(state);
             }
             EditorGUILayout.EndHorizontal();
+            if (!_controller.IsPreviewing && GUILayout.Button("预览当前状态"))
+                ApplyState(_controller.SelectedState);
             EditorGUILayout.HelpBox(
-                $"当前状态：{_controller.SelectedState}。点状态名立即应用到子节点，再改外观并记录。",
+                $"当前状态：{_controller.SelectedState}。● 表示该状态覆盖了默认值；* 表示画布有尚未记录的改动。",
                 MessageType.None);
         }
 
         private void ApplyState(string state)
         {
+            if (_controller.IsPreviewing && state != _controller.SelectedState)
+            {
+                UIElement[] pending = _controller.GetComponentsInChildren<UIElement>(true)
+                    .Where(item => item.BelongsTo(_controller) &&
+                                   item.GetModifiedProperties(_controller.SelectedState) != UIStateProperty.None)
+                    .ToArray();
+                if (pending.Length > 0)
+                {
+                    int choice = EditorUtility.DisplayDialogComplex("切换 UI 状态",
+                        $"当前状态有 {pending.Length} 个节点的画布改动尚未记录。",
+                        "记录并切换", "丢弃并切换", "取消");
+                    if (choice == 2) return;
+                    if (choice == 0) RecordModified(pending);
+                }
+            }
             Undo.RecordObjects(_controller.GetComponentsInChildren<Component>(true), "Apply UI state");
             _controller.SetState(state);
             SceneView.RepaintAll();
@@ -114,11 +139,32 @@ namespace EasyFramework.Editor.UI
 
         private void RecordCurrent()
         {
-            Undo.RecordObjects(_controller.GetComponentsInChildren<UIElement>(true), "Capture UI state");
-            _controller.CaptureCurrentToSelectedState();
-            EditorUtility.SetDirty(_controller);
-            foreach (UIElement element in _controller.GetComponentsInChildren<UIElement>(true))
-                EditorUtility.SetDirty(element);
+            UIElement[] elements = _controller.GetComponentsInChildren<UIElement>(true)
+                .Where(item => item.BelongsTo(_controller)).ToArray();
+            RecordModified(elements);
+        }
+
+        private void RecordModified(UIElement[] elements)
+        {
+            foreach (UIElement element in elements)
+            {
+                if (element.GetModifiedProperties(_controller.SelectedState) == UIStateProperty.None) continue;
+                Undo.RecordObject(element, "Capture UI state");
+                if (element.CaptureModifiedProperties(_controller.SelectedState))
+                    EditorUtility.SetDirty(element);
+            }
+            Repaint();
+        }
+
+        private void ResetSelected()
+        {
+            UIElement element = Selection.activeGameObject.GetComponent<UIElement>();
+            if (element == null || !element.BelongsTo(_controller)) return;
+            Undo.RecordObjects(element.GetComponents<Component>(), "Reset UI state override");
+            if (!element.ResetVariant(_controller.SelectedState)) return;
+            _controller.Refresh();
+            EditorUtility.SetDirty(element);
+            SceneView.RepaintAll();
         }
 
         private static string ShortProperties(UIStateProperty properties)

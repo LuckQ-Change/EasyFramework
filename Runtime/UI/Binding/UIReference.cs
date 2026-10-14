@@ -5,6 +5,7 @@ using UnityEngine;
 namespace EasyFramework.UI
 {
     [Serializable]
+    /// <summary>保存一个局部 Key 与目标组件的序列化关联。</summary>
     public sealed class UIReferenceEntry
     {
         [SerializeField] private string _key;

@@ -1,5 +1,6 @@
 namespace EasyFramework
 {
+    /// <summary>提供非模块单例；不参与 ModuleManager 生命周期。</summary>
     public abstract class Singleton<T> where T : class, new()
     {
         private static T _instance;

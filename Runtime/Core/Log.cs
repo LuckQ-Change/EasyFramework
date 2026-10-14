@@ -2,6 +2,7 @@ using System;
 
 namespace EasyFramework
 {
+    /// <summary>表示框架日志的严重级别。</summary>
     public enum LogLevel
     {
         Debug,
@@ -10,6 +11,7 @@ namespace EasyFramework
         Error,
     }
 
+    /// <summary>统一日志入口；自定义处理器失败不会破坏框架调用者。</summary>
     public static class Log
     {
         public static LogLevel MinLevel = LogLevel.Debug;

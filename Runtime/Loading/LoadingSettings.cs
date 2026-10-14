@@ -4,6 +4,7 @@ using UnityEngine;
 namespace EasyFramework
 {
     [Serializable]
+    /// <summary>保存全局加载画面的外观和资源配置。</summary>
     public sealed class LoadingSettings
     {
         [Tooltip("留空表示不创建全局 Loading 界面。")]

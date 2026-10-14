@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 
 namespace EasyFramework
 {
+    /// <summary>合并同地址加载并管理租约计数；关闭时只释放每个底层结果一次。</summary>
     public class AssetModule : ModuleSingleton<AssetModule>
     {
         private sealed class AssetEntry
@@ -224,7 +225,7 @@ namespace EasyFramework
             }
             if (stale)
             {
-                loader.Release(location);
+                // Shutdown 对每个共享加载任务安排一次迟到释放；等待方不可再各自 Release。
                 return (null, generation);
             }
 

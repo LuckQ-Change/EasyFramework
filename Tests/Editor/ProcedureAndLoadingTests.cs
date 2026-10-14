@@ -101,5 +101,44 @@ namespace EasyFramework.Tests
             }
             finally { modules.ShutdownAll(); }
         }
+
+        [Test]
+        public void LoadingModule_ListenerFailureDoesNotBlockCleanupOrOtherListeners()
+        {
+            var modules = new ModuleManager();
+            LoadingModule loading = modules.Register<LoadingModule>();
+            modules.InitAll();
+            int observed = 0;
+            loading.Changed += _ => throw new InvalidOperationException("listener");
+            loading.Changed += _ => observed++;
+            IDisposable scope = loading.Begin("测试");
+            loading.Report(0.5f);
+            scope.Dispose();
+            Assert.AreEqual(3, observed);
+            Assert.IsFalse(loading.IsLoading);
+            modules.ShutdownAll();
+            loading.Report(0.2f);
+            Assert.IsFalse(loading.IsLoading);
+            Assert.Throws<InvalidOperationException>(() => loading.Begin());
+        }
+
+        [Test]
+        public void ProcedureStart_PreCanceledTokenLeavesContextWithCaller()
+        {
+            var modules = new ModuleManager();
+            ProcedureModule procedures = modules.Register<ProcedureModule>();
+            modules.InitAll();
+            var context = new ProjectProcedureContext(new ProjectScript());
+            using (var canceled = new CancellationTokenSource())
+            {
+                canceled.Cancel();
+                Assert.Throws<OperationCanceledException>(() =>
+                    procedures.StartAsync<FirstProcedure>(context, canceled.Token));
+            }
+            Assert.IsFalse(context.IsDisposed);
+            Assert.IsNull(procedures.ActiveProcedure);
+            context.Dispose();
+            modules.ShutdownAll();
+        }
     }
 }

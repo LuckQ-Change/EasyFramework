@@ -257,10 +257,7 @@ namespace EasyFramework.Editor.UI
                 _validationError = error;
                 return;
             }
-            _needsTypeSync = !string.Equals(
-                _viewTypeName.stringValue,
-                GetStoredTypeName(type),
-                StringComparison.Ordinal);
+            _needsTypeSync = !MatchesStoredTypeName(_viewTypeName.stringValue, type);
         }
 
         private static bool TryValidateScript(
@@ -303,5 +300,9 @@ namespace EasyFramework.Editor.UI
 
         private static string GetStoredTypeName(Type type) =>
             $"{type.FullName}, {type.Assembly.GetName().Name}";
+
+        internal static bool MatchesStoredTypeName(string storedName, Type type) =>
+            type != null && (string.Equals(storedName, type.FullName, StringComparison.Ordinal) ||
+                             string.Equals(storedName, GetStoredTypeName(type), StringComparison.Ordinal));
     }
 }

@@ -38,6 +38,7 @@ private static void RegisterModules()
 
 完整 API 和生命周期说明见 [使用说明](doc/使用说明.md)，框架约束和测试要求见 [开发指南](doc/开发指南.md)。
 分阶段的职责审查、UI 编辑器与动画优化见 [开发优化计划](doc/开发优化计划.md)。
+各模块的所有权与异常收尾见 [模块职责](doc/模块职责)。
 Tween API 与播放语义见 [Tween 使用说明](doc/Tween使用说明.md)。
 
 UI 业务统一通过 `UIService` 打开、查找和关闭纯 C# View；Prefab 配置、Binding、页面栈与状态机由底层自动管理。详见 [UI 框架使用说明](doc/UI框架使用说明.md)。
@@ -51,7 +52,7 @@ UI 业务统一通过 `UIService` 打开、查找和关闭纯 C# View；Prefab �
 
 ## 测试
 
-在 Unity Test Runner 中运行 `com.wjq.easyframework.tests` EditMode 测试程序集。
+在 Unity Test Runner 中运行 `com.wjq.easyframework.tests` EditMode 与 `com.wjq.easyframework.playmode-tests` PlayMode 测试程序集。演示场景为 `Assets/Scenes/FrameworkShowcase.unity`；模块职责及验收记录见 `doc/`。
 
 ## 当前启动架构
 

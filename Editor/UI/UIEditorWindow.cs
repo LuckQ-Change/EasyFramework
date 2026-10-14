@@ -7,7 +7,7 @@ namespace EasyFramework.Editor.UI
     {
         private Vector2 _scroll;
 
-        [MenuItem("Tools/EasyFramework/UI/UI Editor", false, 0)]
+        [MenuItem("Tools/EasyFramework/UI/Component Converter", false, 30)]
         private static void Open()
         {
             var window = GetWindow<UIEditorWindow>("UI Editor");

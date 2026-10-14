@@ -4,6 +4,7 @@ using UnityEngine;
 namespace EasyFramework.UI
 {
     [Flags]
+    /// <summary>标识状态系统可覆盖的节点属性。</summary>
     public enum UIStateProperty
     {
         None = 0,
@@ -19,6 +20,7 @@ namespace EasyFramework.UI
     }
 
     [Serializable]
+    /// <summary>保存单个状态的属性覆盖；未勾选属性沿用默认值。</summary>
     public sealed class UIStateVariant
     {
         [SerializeField] private string _state;

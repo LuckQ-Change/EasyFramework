@@ -6,6 +6,7 @@ using UnityEngine.Video;
 
 namespace EasyFramework
 {
+    /// <summary>选择 Loading 背景内容的展示方式。</summary>
     public enum LoadingBackgroundMode
     {
         ImageRotation,
@@ -14,6 +15,7 @@ namespace EasyFramework
 
     [AddComponentMenu("EasyFramework/Loading Presenter")]
     [DisallowMultipleComponent]
+    /// <summary>把加载状态展示到 UGUI，不调度加载任务。</summary>
     public sealed class LoadingPresenter : MonoBehaviour
     {
         [Header("进度")]

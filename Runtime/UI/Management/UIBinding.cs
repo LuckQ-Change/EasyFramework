@@ -87,6 +87,8 @@ namespace EasyFramework.UI
         {
             foreach (UIReference marker in Display.GetComponentsInChildren<UIReference>(true))
             {
+                // 嵌套 Item 自己拥有绑定作用域；重复使用 Item 时其 Key 不能进入父页面。
+                if (marker.GetComponentInParent<UIDisplay>(true) != Display) continue;
                 foreach (UIReferenceEntry entry in marker.Entries)
                 {
                     if (entry == null || entry.Target == null || string.IsNullOrWhiteSpace(entry.Key)) continue;
