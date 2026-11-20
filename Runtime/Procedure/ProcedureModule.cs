@@ -5,199 +5,147 @@ using System.Threading.Tasks;
 
 namespace EasyFramework
 {
-    /// <summary>串行切换业务流程，并在接受上下文后负责其释放。</summary>
-    public sealed class ProcedureModule : ModuleSingleton<ProcedureModule>
+    /// <summary>管理当前流程和上下文，同一时间只允许执行一次切换。</summary>
+    public sealed class ProcedureModule : Module<ProcedureModule>, IFrameUpdate
     {
-        private readonly Dictionary<Type, ProcedureBase> _procedures =
-            new Dictionary<Type, ProcedureBase>();
-        private readonly SemaphoreSlim _transitionGate = new SemaphoreSlim(1, 1);
-        private CancellationTokenSource _shutdown;
+        private readonly Dictionary<Type, ProcedureBase> _procedures = new();
+        private readonly CancellationTokenSource _shutdown = new();
         private ProcedureContext _context;
         private ProcedureBase _active;
+        private TaskCompletionSource<bool> _transitionFinished;
 
         public ProcedureBase ActiveProcedure => _active;
         public Type ActiveProcedureType => _active?.GetType();
         public bool IsTransitioning { get; private set; }
-
         public event Action<Type, Type> ProcedureChanged;
 
-        public TProcedure Register<TProcedure>() where TProcedure : ProcedureBase, new()
+        public void Register(ProcedureBase procedure)
         {
-            return (TProcedure)Register((ProcedureBase)new TProcedure());
-        }
-
-        public TProcedure Register<TProcedure>(TProcedure procedure) where TProcedure : ProcedureBase
-        {
-            return (TProcedure)Register((ProcedureBase)procedure);
-        }
-
-        public ProcedureBase Register(Type procedureType)
-        {
-            if (procedureType == null) throw new ArgumentNullException(nameof(procedureType));
-            if (_procedures.TryGetValue(procedureType, out ProcedureBase existing))
-                return existing;
-
-            ValidateProcedureType(procedureType);
-            var procedure = Activator.CreateInstance(procedureType) as ProcedureBase;
-            if (procedure == null)
-                throw new InvalidOperationException($"无法创建流程“{procedureType.FullName}”。");
-            _procedures.Add(procedureType, procedure);
-            return procedure;
-        }
-
-        public ProcedureBase Register(ProcedureBase procedure)
-        {
+            EnsureAvailable();
             if (procedure == null) throw new ArgumentNullException(nameof(procedure));
-            Type type = procedure.GetType();
-            if (_procedures.TryGetValue(type, out ProcedureBase existing))
-                return existing;
+            _procedures.Add(procedure.GetType(), procedure);
+        }
+
+        public Task StartAsync<TProcedure>(ProcedureContext context = null, CancellationToken cancellationToken = default)
+            where TProcedure : ProcedureBase => StartAsync(typeof(TProcedure), context, cancellationToken);
+
+        public Task StartAsync(Type procedureType, ProcedureContext context = null, CancellationToken cancellationToken = default)
+        {
+            EnsureAvailable();
+            if (_context != null) throw new InvalidOperationException("流程已启动，请使用 ChangeAsync。");
+            cancellationToken.ThrowIfCancellationRequested();
+            ProcedureBase first = Resolve(procedureType);
+            _context = context ?? new ProcedureContext();
+            return TransitionAsync(first, cancellationToken);
+        }
+
+        public Task ChangeAsync<TProcedure>(CancellationToken cancellationToken = default)
+            where TProcedure : ProcedureBase => ChangeAsync(typeof(TProcedure), cancellationToken);
+
+        public Task ChangeAsync(Type procedureType, CancellationToken cancellationToken = default)
+        {
+            EnsureAvailable();
+            if (IsTransitioning) throw new InvalidOperationException("流程正在切换。自动跳转请在进入流程时返回 Next<T>()。");
+            if (_context == null) throw new InvalidOperationException("请先启动流程。");
+            cancellationToken.ThrowIfCancellationRequested();
+            return TransitionAsync(Resolve(procedureType), cancellationToken);
+        }
+
+        void IFrameUpdate.Tick(float deltaTime)
+        {
+            if (!IsTransitioning) _active?.Update(deltaTime);
+        }
+
+        protected override async Task OnShutdownAsync()
+        {
+            Task transition = _transitionFinished?.Task;
+            try { _shutdown.Cancel(); }
+            catch (Exception exception) { Log.Error("[Procedure] 关闭流程时取消失败。", exception); }
+            if (transition != null) await transition;
+            await ClearAsync();
+            _procedures.Clear();
+            ProcedureChanged = null;
+            _shutdown.Dispose();
+        }
+
+        private async Task TransitionAsync(ProcedureBase next, CancellationToken cancellationToken)
+        {
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _shutdown.Token);
+            CancellationToken token = linked.Token;
+            var finished = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _transitionFinished = finished;
+            IsTransitioning = true;
+            try
+            {
+                for (int count = 0; count < 32; count++)
+                {
+                    token.ThrowIfCancellationRequested();
+                    ProcedureBase previous = _active;
+                    _active = null;
+                    if (previous != null) await previous.ExitAsync(token);
+                    token.ThrowIfCancellationRequested();
+
+                    _active = next;
+                    Type following = await next.EnterAsync(_context, token);
+                    token.ThrowIfCancellationRequested();
+                    NotifyChanged(previous?.GetType(), next.GetType());
+                    token.ThrowIfCancellationRequested();
+                    if (following == null) return;
+                    next = Resolve(following);
+                }
+                throw new InvalidOperationException("流程连续自动跳转超过 32 次，请检查配置。");
+            }
+            catch
+            {
+                await ClearAsync();
+                throw;
+            }
+            finally
+            {
+                IsTransitioning = false;
+                _transitionFinished = null;
+                finished.TrySetResult(true);
+            }
+        }
+
+        private async Task ClearAsync()
+        {
+            ProcedureBase active = _active;
+            _active = null;
+            try
+            {
+                if (active != null) await active.ExitAsync(CancellationToken.None);
+            }
+            catch (Exception exception) { Log.Error("[Procedure] 退出流程失败。", exception); }
+            finally
+            {
+                try { _context?.Dispose(); }
+                catch (Exception exception) { Log.Error("[Procedure] 释放流程上下文失败。", exception); }
+                finally { _context = null; }
+            }
+        }
+
+        private ProcedureBase Resolve(Type type)
+        {
+            if (type == null) throw new ArgumentNullException(nameof(type));
+            if (_procedures.TryGetValue(type, out ProcedureBase procedure)) return procedure;
+            if (!typeof(ProcedureBase).IsAssignableFrom(type) || type.IsAbstract || type.GetConstructor(Type.EmptyTypes) == null)
+                throw new ArgumentException($"流程“{type.FullName}”必须是具有公开无参构造函数的 ProcedureBase，或预先注册实例。");
+
+            procedure = (ProcedureBase)Activator.CreateInstance(type);
             _procedures.Add(type, procedure);
             return procedure;
         }
 
-        public Task StartAsync<TProcedure>(
-            ProcedureContext context,
-            CancellationToken cancellationToken = default(CancellationToken))
-            where TProcedure : ProcedureBase
+        private void NotifyChanged(Type previous, Type current)
         {
-            return StartAsync(typeof(TProcedure), context, cancellationToken);
+            try { ProcedureChanged?.Invoke(previous, current); }
+            catch (Exception exception) { Log.Error("[Procedure] 切换通知失败。", exception); }
         }
 
-        public Task StartAsync(
-            Type procedureType,
-            ProcedureContext context,
-            CancellationToken cancellationToken = default(CancellationToken))
+        private void EnsureAvailable()
         {
-            if (_context != null)
-                throw new InvalidOperationException("流程已经启动，不能重复启动。");
-            if (procedureType == null) throw new ArgumentNullException(nameof(procedureType));
-            if (context == null) throw new ArgumentNullException(nameof(context));
-            cancellationToken.ThrowIfCancellationRequested();
-            Register(procedureType);
-            _context = context;
-            return ChangeAsync(procedureType, cancellationToken);
-        }
-
-        public Task ChangeAsync<TProcedure>(
-            CancellationToken cancellationToken = default(CancellationToken))
-            where TProcedure : ProcedureBase => ChangeAsync(typeof(TProcedure), cancellationToken);
-
-        public async Task ChangeAsync(
-            Type procedureType,
-            CancellationToken cancellationToken = default(CancellationToken))
-        {
-            if (procedureType == null) throw new ArgumentNullException(nameof(procedureType));
-            if (_context == null)
-                throw new InvalidOperationException("请先使用 ProcedureContext 启动流程模块。");
-            Register(procedureType);
-
-            CancellationToken shutdownToken = _shutdown?.Token ?? CancellationToken.None;
-            using (var linked = CancellationTokenSource.CreateLinkedTokenSource(
-                       cancellationToken, shutdownToken))
-            {
-                await _transitionGate.WaitAsync(linked.Token);
-                IsTransitioning = true;
-                try
-                {
-                    Type next = procedureType;
-                    int automaticTransitionCount = 0;
-                    while (next != null)
-                    {
-                        linked.Token.ThrowIfCancellationRequested();
-                        if (++automaticTransitionCount > 32)
-                            throw new InvalidOperationException("流程链连续自动跳转超过 32 次，请检查是否存在死循环。");
-                        next = await EnterNextAsync(next, linked.Token);
-                    }
-                }
-                catch
-                {
-                    _context?.Dispose();
-                    _context = null;
-                    throw;
-                }
-                finally
-                {
-                    IsTransitioning = false;
-                    _transitionGate.Release();
-                }
-            }
-        }
-
-        protected override void OnInit()
-        {
-            _shutdown = new CancellationTokenSource();
-        }
-
-        protected override void OnUpdate(float deltaTime)
-        {
-            _active?.Update(deltaTime);
-        }
-
-        protected override void OnShutdown()
-        {
-            _shutdown?.Cancel();
-            ProcedureBase active = _active;
-            _active = null;
-            if (active != null && !IsTransitioning) _ = ExitAfterShutdownAsync(active);
-            _context?.Dispose();
-            _context = null;
-            _procedures.Clear();
-            ProcedureChanged = null;
-            _shutdown?.Dispose();
-            _shutdown = null;
-        }
-
-        private async Task<Type> EnterNextAsync(Type procedureType, CancellationToken cancellationToken)
-        {
-            Type previousType = _active?.GetType();
-            if (_active != null)
-            {
-                await _active.ExitAsync(cancellationToken);
-                _active = null;
-            }
-
-            ProcedureBase nextProcedure = Register(procedureType);
-            _active = nextProcedure;
-            try
-            {
-                Type automaticNext = await nextProcedure.EnterAsync(this, _context, cancellationToken);
-                ProcedureChanged?.Invoke(previousType, procedureType);
-                Log.Info($"[Procedure] {procedureType.Name}");
-                return automaticNext;
-            }
-            catch
-            {
-                _active = null;
-                try { await nextProcedure.ExitAsync(CancellationToken.None); }
-                catch { }
-                throw;
-            }
-        }
-
-        private static async Task ExitAfterShutdownAsync(ProcedureBase procedure)
-        {
-            try { await procedure.ExitAsync(CancellationToken.None); }
-            catch (Exception exception)
-            {
-                Log.Error("[Procedure] 关闭流程时退出失败。", exception);
-            }
-        }
-
-        private static void ValidateProcedureType(Type procedureType)
-        {
-            if (procedureType == null) throw new ArgumentNullException(nameof(procedureType));
-            if (!typeof(ProcedureBase).IsAssignableFrom(procedureType))
-                throw new ArgumentException(
-                    $"类型“{procedureType.FullName}”必须继承 ProcedureBase。",
-                    nameof(procedureType));
-            if (procedureType.IsAbstract)
-                throw new ArgumentException(
-                    $"流程类型“{procedureType.FullName}”不能是抽象类。",
-                    nameof(procedureType));
-            if (procedureType.GetConstructor(Type.EmptyTypes) == null)
-                throw new ArgumentException(
-                    $"流程类型“{procedureType.FullName}”必须提供公开的无参构造函数。",
-                    nameof(procedureType));
+            if (_shutdown.IsCancellationRequested) throw new ObjectDisposedException(nameof(ProcedureModule));
         }
     }
 }

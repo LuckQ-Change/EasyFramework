@@ -4,7 +4,7 @@ using System.Collections.Generic;
 namespace EasyFramework
 {
     /// <summary>按模块 Update 推进延迟与循环回调；回调中新增任务下一帧才生效。</summary>
-    public class TimerModule : ModuleSingleton<TimerModule>
+    public class TimerModule : Module<TimerModule>, IFrameUpdate
     {
         private class TimerHandle
         {
@@ -76,7 +76,7 @@ namespace EasyFramework
             foreach (var timer in _pending) timer.Canceled = true;
         }
 
-        protected override void OnUpdate(float deltaTime)
+        void IFrameUpdate.Tick(float deltaTime)
         {
             if (_ticking) return;
             _ticking = true;
@@ -85,7 +85,7 @@ namespace EasyFramework
                 for (int i = 0; i < _timers.Count; i++)
                 {
                     var t = _timers[i];
-                    if (t.Canceled) continue;
+                    if (t.Canceled || deltaTime <= 0f) continue;
 
                     t.Elapsed += deltaTime;
                     if (t.Elapsed < t.Interval) continue;
@@ -93,7 +93,7 @@ namespace EasyFramework
                     try { t.Callback(); }
                     catch (Exception ex) { Log.Error("[Timer] callback error.", ex); }
 
-                    if (t.Repeat) t.Elapsed -= t.Interval;
+                    if (t.Repeat) t.Elapsed = t.Interval > 0f ? t.Elapsed % t.Interval : 0f;
                     else t.Canceled = true;
                 }
             }

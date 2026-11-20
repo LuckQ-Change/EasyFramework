@@ -94,7 +94,7 @@ namespace EasyFramework.Editor.UI
             }
             EditorGUILayout.EndScrollView();
             if (GUILayout.Button("Validate Display"))
-                UIValidator.ValidateAndReport(_controller.GetComponentInParent<UIDisplay>());
+                UIValidator.ValidateAndReport(_controller.GetComponentInParent<UIBindingRoot>());
         }
 
         private void DrawStateBar()

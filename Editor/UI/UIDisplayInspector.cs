@@ -1,308 +1,84 @@
 using System;
-using System.IO;
 using EasyFramework.UI;
 using UnityEditor;
 using UnityEngine;
 
 namespace EasyFramework.Editor.UI
 {
-    [CustomEditor(typeof(UIDisplay))]
+    [CustomEditor(typeof(UIBindingRoot), true)]
     internal sealed class UIDisplayInspector : UnityEditor.Editor
     {
-        private SerializedProperty _viewTypeName;
-        private SerializedProperty _viewScriptPath;
-        private SerializedProperty _prefabLocationProperty;
-        private MonoScript _viewScript;
-        private string _validationError;
-        private bool _needsTypeSync;
-        private bool _showGenerator;
-        private bool _showAdvancedConfiguration;
-        private string _className;
-        private string _namespaceName = UIScriptGenerator.DefaultNamespace;
-        private string _prefabLocation;
-        private string _scriptFolder = UIScriptGenerator.DefaultScriptFolder;
-
-        private void OnEnable()
-        {
-            _viewTypeName = serializedObject.FindProperty("_viewTypeName");
-            _viewScriptPath = serializedObject.FindProperty("_viewScriptPath");
-            _prefabLocationProperty = serializedObject.FindProperty("_prefabLocation");
-            RefreshSelectedScript();
-
-            var display = (UIDisplay)target;
-            Type selectedType = _viewScript?.GetClass();
-            _className = selectedType == null
-                ? display.name.Replace(" ", string.Empty)
-                : selectedType.Name;
-            _namespaceName = string.IsNullOrWhiteSpace(selectedType?.Namespace)
-                ? UIScriptGenerator.DefaultNamespace
-                : selectedType.Namespace;
-            _prefabLocation = display.PrefabLocation;
-            if (!string.IsNullOrWhiteSpace(display.ViewScriptPath))
-                _scriptFolder = Path.GetDirectoryName(display.ViewScriptPath)?.Replace('\\', '/');
-        }
+        private static readonly string[] DisplayKinds = { "Screen", "Popup", "Item" };
+        private string _error;
 
         public override void OnInspectorGUI()
         {
-            var display = (UIDisplay)target;
+            var root = (UIBindingRoot)target;
             serializedObject.Update();
-            EditorGUILayout.LabelField(
-                display.ManagedAsView ? "UI 页面" : "UI 嵌套组件",
-                new GUIStyle(EditorStyles.boldLabel) { fontSize = 14 });
-            EditorGUILayout.Space(4f);
-            EditorGUILayout.LabelField(display.ManagedAsView ? "页面逻辑" : "组件逻辑", EditorStyles.boldLabel);
-            EditorGUI.BeginChangeCheck();
-            MonoScript selected = (MonoScript)EditorGUILayout.ObjectField(
-                display.ManagedAsView ? "页面脚本" : "Item 脚本",
-                _viewScript,
-                typeof(MonoScript),
-                false);
-            if (EditorGUI.EndChangeCheck()) ApplySelectedScript(selected);
 
-            if (_viewScript != null && display.ManagedAsView)
+            UIPageKind kind = root.Kind;
+            if (root is UIDisplay)
+                kind = (UIPageKind)EditorGUILayout.Popup("类型", Mathf.Clamp((int)kind, 0, DisplayKinds.Length - 1), DisplayKinds);
+            else EditorGUILayout.LabelField("类型", "Node");
+
+            string path = string.IsNullOrEmpty(root.ViewScriptGuid) ? null : AssetDatabase.GUIDToAssetPath(root.ViewScriptGuid);
+            MonoScript script = string.IsNullOrEmpty(path) ? null : AssetDatabase.LoadAssetAtPath<MonoScript>(path);
+            MonoScript selected = (MonoScript)EditorGUILayout.ObjectField("业务脚本", script, typeof(MonoScript), false);
+            if (kind != root.Kind || selected != script)
             {
-                using (new EditorGUI.DisabledScope(true))
-                    EditorGUILayout.TextField("资源地址", display.PrefabLocation);
-                EditorGUILayout.LabelField(
-                    "资源地址来自 View 脚本上的 UIPrefab 特性。",
-                    EditorStyles.wordWrappedMiniLabel);
+                _error = null;
+                try { SetBinding(kind, selected); }
+                catch (InvalidOperationException exception)
+                {
+                    _error = exception.Message;
+                    if (kind != root.Kind) SetBinding(kind, null);
+                }
             }
 
-            if (!string.IsNullOrEmpty(_validationError))
-                EditorGUILayout.HelpBox(_validationError, MessageType.Error);
-            else if (_needsTypeSync)
+            if (UIBindingRoot.IsPageKind(kind))
             {
-                EditorGUILayout.HelpBox(
-                    "Prefab 保存的类型名与所选脚本不一致。",
-                    MessageType.Warning);
-                if (GUILayout.Button("同步为所选脚本类型")) ApplySelectedScript(_viewScript);
+                SerializedProperty address = serializedObject.FindProperty("_prefabLocation");
+                address.stringValue = EditorGUILayout.DelayedTextField("资源地址", address.stringValue);
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("_closeOnBack"), new GUIContent("允许返回关闭"));
             }
-            else if (_viewScript == null)
-                EditorGUILayout.HelpBox("请选择一个继承 UIObject 的业务脚本。", MessageType.Info);
-
-            EditorGUILayout.Space(6f);
-            DrawDisplaySettings();
+            if (kind == UIPageKind.Popup)
+            {
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("_backgroundColor"), new GUIContent("遮罩颜色"));
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("_closeOnBackground"), new GUIContent("点击遮罩关闭"));
+            }
             serializedObject.ApplyModifiedProperties();
 
-            _showGenerator = EditorGUILayout.Foldout(
-                _showGenerator,
-                display.ManagedAsView ? "生成新的页面脚本" : "生成新的 Item 脚本",
-                true);
-            if (_showGenerator)
-            {
-                EditorGUI.indentLevel++;
-                _className = EditorGUILayout.TextField("类名", _className);
-                _namespaceName = EditorGUILayout.TextField("命名空间", _namespaceName);
-                if (display.ManagedAsView)
-                    _prefabLocation = EditorGUILayout.TextField("资源地址", _prefabLocation);
-                DrawFolderField("脚本目录", ref _scriptFolder);
-                if (GUILayout.Button("生成并选择脚本", GUILayout.Height(26f)))
-                {
-                    try
-                    {
-                        string path = UIScriptGenerator.Generate(
-                            display,
-                            _className,
-                            _namespaceName,
-                            _prefabLocation,
-                            _scriptFolder);
-                        RefreshSelectedScript();
-                        Debug.Log($"[UI] 已生成 View：{path}", display);
-                    }
-                    catch (Exception exception) { Debug.LogException(exception, display); }
-                }
-                EditorGUI.indentLevel--;
-            }
-
-            if (GUILayout.Button("校验 Display")) UIValidator.ValidateAndReport(display);
-            EditorGUILayout.HelpBox(
-                "业务脚本通过对象框选择；类型名和资源地址会从脚本自动同步，不需要手动维护内部字符串。",
+            if (_error != null) EditorGUILayout.HelpBox(_error, MessageType.Warning);
+            EditorGUILayout.HelpBox(root is UINode
+                ? "使用继承 UINodeView 的脚本。放进页面后命名为 node_属性名，保存父 Prefab 即生成直接引用。"
+                : "选择类型并关联业务脚本。控件按关键字命名，保存 Prefab 后同步强类型属性。",
                 MessageType.Info);
         }
 
-        private void DrawDisplaySettings()
+        private void SetBinding(UIPageKind kind, MonoScript script)
         {
-            SerializedProperty managedAsView = serializedObject.FindProperty("_managedAsView");
-            EditorGUILayout.LabelField("显示行为", EditorStyles.boldLabel);
-            EditorGUILayout.PropertyField(
-                managedAsView,
-                new GUIContent("类型", "页面由 UI 管理；嵌套组件由所属页面管理生命周期。"));
-            if (!managedAsView.boolValue)
+            Type view = null;
+            string guid = string.Empty;
+            if (script != null)
             {
-                EditorGUILayout.HelpBox(
-                    "嵌套组件不会进入页面栈，不配置层级、返回键或共享背景。",
-                    MessageType.None);
-                DrawCreationSettings();
-                return;
+                string path = AssetDatabase.GetAssetPath(script);
+                if (!path.StartsWith("Assets/", StringComparison.Ordinal))
+                    throw new InvalidOperationException("请选择项目 Assets 下的业务脚本。");
+                view = script.GetClass();
+                UIReferenceCodeGenerator.ViewArguments(view, kind);
+                guid = AssetDatabase.AssetPathToGUID(path);
             }
+            SerializedProperty address = serializedObject.FindProperty("_prefabLocation");
+            string location = address?.stringValue;
+            if (UIBindingRoot.IsPageKind(kind) && string.IsNullOrWhiteSpace(location) && view != null)
+                location = UICreationWizard.LocationFor(view.Name);
 
-            EditorGUILayout.PropertyField(serializedObject.FindProperty("_defaultLayer"), new GUIContent("默认层级"));
-            EditorGUILayout.PropertyField(serializedObject.FindProperty("_singleInstance"), new GUIContent("单例界面"));
-            EditorGUILayout.PropertyField(serializedObject.FindProperty("_closeOnBack"), new GUIContent("响应返回关闭"));
-            EditorGUILayout.PropertyField(serializedObject.FindProperty("_stretchToLayer"), new GUIContent("拉伸到层级尺寸"));
+            SerializedProperty kindProperty = serializedObject.FindProperty("_kind");
+            if (kindProperty != null) kindProperty.enumValueIndex = (int)kind;
+            serializedObject.FindProperty("_viewTypeName").stringValue = view?.FullName ?? string.Empty;
+            serializedObject.FindProperty("_viewScriptGuid").stringValue = guid;
 
-            EditorGUILayout.Space(4f);
-            EditorGUILayout.LabelField("共享背景", EditorStyles.boldLabel);
-            SerializedProperty backgroundMode = serializedObject.FindProperty("_backgroundMode");
-            EditorGUILayout.PropertyField(backgroundMode, new GUIContent("背景模式"));
-            if (backgroundMode.enumValueIndex != 0)
-            {
-                EditorGUILayout.PropertyField(serializedObject.FindProperty("_closeOnBackground"), new GUIContent("点击背景关闭"));
-                EditorGUILayout.PropertyField(serializedObject.FindProperty("_backgroundColor"), new GUIContent("背景颜色"));
-            }
-
-            DrawCreationSettings();
+            if (address != null) address.stringValue = UIBindingRoot.IsPageKind(kind) ? location : string.Empty;
         }
-
-        private void DrawCreationSettings()
-        {
-            _showAdvancedConfiguration = EditorGUILayout.Foldout(
-                _showAdvancedConfiguration,
-                "高级配置",
-                true);
-            if (!_showAdvancedConfiguration) return;
-            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
-            {
-                if (serializedObject.FindProperty("_managedAsView").boolValue)
-                    EditorGUILayout.PropertyField(serializedObject.FindProperty("_viewId"), new GUIContent("页面 Id（可选）"));
-                else
-                    EditorGUILayout.PropertyField(serializedObject.FindProperty("_createOnAwake"), new GUIContent("Awake 时创建 Logic"));
-            }
-        }
-
-        private static void DrawFolderField(string label, ref string value)
-        {
-            EditorGUILayout.BeginHorizontal();
-            value = EditorGUILayout.TextField(label, value);
-            if (GUILayout.Button("选择…", GUILayout.Width(64f)))
-            {
-                string absolute = EditorUtility.OpenFolderPanel(label, Application.dataPath, string.Empty);
-                if (!string.IsNullOrWhiteSpace(absolute))
-                {
-                    string relative = FileUtil.GetProjectRelativePath(absolute);
-                    if (string.IsNullOrWhiteSpace(relative))
-                        EditorUtility.DisplayDialog("UI", "目录必须位于当前项目的 Assets 下。", "确定");
-                    else
-                        value = relative.TrimEnd('/', '\\');
-                }
-            }
-            EditorGUILayout.EndHorizontal();
-        }
-
-        private void ApplySelectedScript(MonoScript script)
-        {
-            serializedObject.Update();
-            _validationError = null;
-            _needsTypeSync = false;
-            if (script == null)
-            {
-                _viewScript = null;
-                _viewTypeName.stringValue = string.Empty;
-                _viewScriptPath.stringValue = string.Empty;
-                serializedObject.ApplyModifiedProperties();
-                return;
-            }
-
-            if (!TryValidateScript(script, (UIDisplay)target, out Type type, out string error))
-            {
-                _validationError = error;
-                return;
-            }
-
-            _viewScript = script;
-            _viewTypeName.stringValue = GetStoredTypeName(type);
-            _viewScriptPath.stringValue = AssetDatabase.GetAssetPath(script);
-            if (UIFactory.TryGetPrefabLocation(type, out string prefabLocation))
-            {
-                _prefabLocationProperty.stringValue = prefabLocation;
-                _prefabLocation = prefabLocation;
-            }
-            serializedObject.ApplyModifiedProperties();
-            EditorUtility.SetDirty(target);
-            PrefabUtility.RecordPrefabInstancePropertyModifications(target);
-        }
-
-        private void RefreshSelectedScript()
-        {
-            serializedObject.Update();
-            _viewScript = null;
-            _validationError = null;
-            _needsTypeSync = false;
-            string scriptPath = _viewScriptPath?.stringValue;
-            if (!string.IsNullOrWhiteSpace(scriptPath))
-                _viewScript = AssetDatabase.LoadAssetAtPath<MonoScript>(scriptPath);
-
-            if (_viewScript == null && !string.IsNullOrWhiteSpace(_viewTypeName?.stringValue))
-            {
-                Type storedType = Type.GetType(_viewTypeName.stringValue, false);
-                if (storedType != null)
-                {
-                    string[] guids = AssetDatabase.FindAssets($"{storedType.Name} t:MonoScript");
-                    for (int i = 0; i < guids.Length; i++)
-                    {
-                        MonoScript candidate = AssetDatabase.LoadAssetAtPath<MonoScript>(
-                            AssetDatabase.GUIDToAssetPath(guids[i]));
-                        if (candidate != null && candidate.GetClass() == storedType)
-                        {
-                            _viewScript = candidate;
-                            break;
-                        }
-                    }
-                }
-            }
-
-            if (_viewScript == null) return;
-            if (!TryValidateScript(_viewScript, (UIDisplay)target, out Type type, out string error))
-            {
-                _validationError = error;
-                return;
-            }
-            _needsTypeSync = !MatchesStoredTypeName(_viewTypeName.stringValue, type);
-        }
-
-        private static bool TryValidateScript(
-            MonoScript script,
-            UIDisplay display,
-            out Type type,
-            out string error)
-        {
-            type = script.GetClass();
-            if (type == null)
-            {
-                error = "所选脚本尚未成功编译，或脚本中没有与文件同名的类型。";
-                return false;
-            }
-            if (!typeof(UIObject).IsAssignableFrom(type))
-            {
-                error = $"“{type.FullName}”必须继承 UIObject。";
-                return false;
-            }
-            if (display.ManagedAsView && !typeof(UIView).IsAssignableFrom(type))
-            {
-                error = $"“{type.FullName}”必须继承 UIView 才能作为受管理 View。";
-                return false;
-            }
-            if (type.IsAbstract || type.GetConstructor(Type.EmptyTypes) == null)
-            {
-                error = $"“{type.FullName}”必须是非抽象类型，并提供公开无参构造函数。";
-                return false;
-            }
-            string path = AssetDatabase.GetAssetPath(script).Replace('\\', '/');
-            if (path.IndexOf("/Editor/", StringComparison.OrdinalIgnoreCase) >= 0)
-            {
-                error = "View 业务脚本不能放在 Editor 目录中。";
-                return false;
-            }
-
-            error = null;
-            return true;
-        }
-
-        private static string GetStoredTypeName(Type type) =>
-            $"{type.FullName}, {type.Assembly.GetName().Name}";
-
-        internal static bool MatchesStoredTypeName(string storedName, Type type) =>
-            type != null && (string.Equals(storedName, type.FullName, StringComparison.Ordinal) ||
-                             string.Equals(storedName, GetStoredTypeName(type), StringComparison.Ordinal));
     }
 }

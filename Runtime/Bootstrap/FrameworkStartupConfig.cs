@@ -1,4 +1,7 @@
 using System;
+using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
 using EasyFramework.UI;
 using UnityEngine;
 
@@ -48,6 +51,17 @@ namespace EasyFramework
         [Header("运行环境")]
         [SerializeField] private RuntimeMode _runtimeMode = RuntimeMode.Editor;
 
+        [Header("资源包与空闲缓存")]
+        [SerializeField] private AssetPackageConfig[] _assetPackages = Array.Empty<AssetPackageConfig>();
+        public IReadOnlyList<AssetPackageConfig> AssetPackages => _assetPackages ?? Array.Empty<AssetPackageConfig>();
+        [SerializeField] private string[] _residentAssets = Array.Empty<string>();
+        [SerializeField, Min(1f)] private float _startupAssetTimeout = 15f;
+        internal IReadOnlyList<string> ResidentAssets => _residentAssets ?? Array.Empty<string>();
+        internal float StartupAssetTimeout => _startupAssetTimeout >= 1f && !float.IsInfinity(_startupAssetTimeout)
+            ? _startupAssetTimeout : 15f;
+        [SerializeField] private bool _overrideAssetCache;
+        [SerializeField] private AssetCacheSettings _assetCache = new AssetCacheSettings();
+
         [Header("真机调试窗口")]
         [SerializeField] private DebugWindowMode _debugWindowMode = DebugWindowMode.DevelopmentBuild;
 
@@ -76,6 +90,27 @@ namespace EasyFramework
                 if (_loading == null) _loading = new LoadingSettings();
                 return _loading;
             }
+        }
+
+        internal void RegisterAssets(ModuleManager modules)
+        {
+            if ((_assetPackages == null || _assetPackages.Length == 0) &&
+                (_residentAssets == null || _residentAssets.Length == 0) && !_overrideAssetCache) return;
+            AssetModule assets = modules.Register<AssetModule>(order: -100);
+            if (_overrideAssetCache) assets.ConfigureCache(_assetCache ?? new AssetCacheSettings());
+            if (_assetPackages == null) return;
+            foreach (AssetPackageConfig package in _assetPackages)
+            {
+                if (package == null) throw new InvalidOperationException("Startup Config contains an empty asset package.");
+                assets.RegisterPackage(package.Alias, package.CreateLoader);
+            }
+        }
+
+        internal async Task WarmLocalPackagesAsync(CancellationToken token)
+        {
+            foreach (AssetPackageConfig package in AssetPackages)
+                if (package is ReferencedAssetPackageConfig)
+                    await AssetModule.Instance.WarmPackageAsync(package.Alias, token);
         }
 
         /// <summary>配置的项目启动流程类型；未配置时返回 null。</summary>
@@ -138,8 +173,6 @@ namespace EasyFramework
             _runtimeDefault.hideFlags = HideFlags.HideAndDontSave;
             return _runtimeDefault;
         }
-
-        internal static void ResetRuntimeDefault() => _runtimeDefault = null;
 
         private void OnValidate()
         {

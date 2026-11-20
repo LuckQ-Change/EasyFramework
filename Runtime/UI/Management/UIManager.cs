@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Collections.ObjectModel;
 using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
@@ -9,742 +8,489 @@ using Object = UnityEngine.Object;
 
 namespace EasyFramework.UI
 {
-    /// <summary>纯 C# UI 服务，Unity 生命周期由 UIRuntimeHost 承接。</summary>
+    public readonly struct UIPageResourceUsage
+    {
+        public Type ViewType { get; }
+        public bool Visible { get; }
+        public int Leases { get; }
+        public long EstimatedBytes { get; }
+
+        internal UIPageResourceUsage(Type viewType, bool visible, int leases, long estimatedBytes)
+        {
+            ViewType = viewType;
+            Visible = visible;
+            Leases = leases;
+            EstimatedBytes = estimatedBytes;
+        }
+    }
+
     public sealed class UIManager
     {
-        private static UIManager _instance;
-        private static bool _quitting;
-
-        private readonly Dictionary<UILayer, RectTransform> _layerRoots = new Dictionary<UILayer, RectTransform>();
-        private readonly Dictionary<string, UIDisplay> _singletons =
-            new Dictionary<string, UIDisplay>(StringComparer.Ordinal);
-        private readonly Dictionary<UIDisplay, IDisposable> _assetLeases =
-            new Dictionary<UIDisplay, IDisposable>();
-        private readonly Dictionary<string, AssetLease<GameObject>> _preloaded =
-            new Dictionary<string, AssetLease<GameObject>>(StringComparer.Ordinal);
-        private readonly List<UIDisplay> _openOrder = new List<UIDisplay>();
-        private readonly ReadOnlyCollection<UIDisplay> _openDisplays;
-
-        private UIRuntimeHost _host;
-        private UIBackground _background;
-        private bool _shuttingDown;
-
-        private UIManager()
+        private sealed class Window
         {
-            _openDisplays = _openOrder.AsReadOnly();
+            public UIDisplay Display;
+            public UIView View;
+            public AssetLease<GameObject> Lease;
+            public bool Retiring;
+            public bool Finished;
+            public readonly TaskCompletionSource<bool> Closed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            public UIPageKind Kind;
         }
 
+        private static bool _quitting;
+        private readonly Dictionary<Type, Window> _windows = new();
+        private readonly List<Window> _order = new();
+        private readonly Dictionary<UILayer, RectTransform> _layers = new();
+        private UIRuntimeHost _host;
+        private UIBackground _background;
+        private Transform _inactiveRoot;
+        private CancellationTokenSource _screenRequest;
+        private bool _stopping;
+
+        public static UIManager Current { get; private set; }
         public static UIManager Instance
         {
             get
             {
                 if (_quitting) return null;
-                if (_instance == null) _instance = new UIManager();
-                _instance.EnsureHost();
-                return _instance;
+                if (Current != null) return Current;
+                UIRuntimeHost host = Object.FindObjectOfType<UIRuntimeHost>(true);
+                if (host == null)
+                {
+                    var root = new GameObject("[UI]", typeof(RectTransform), typeof(Canvas),
+                        typeof(CanvasScaler), typeof(GraphicRaycaster));
+                    host = root.AddComponent<UIRuntimeHost>();
+                }
+                TryAttachHost(host, out UIManager manager);
+                return manager;
             }
         }
-
-        /// <summary>返回已存在的管理器；不会因为查询而创建 UI 根节点。</summary>
-        public static UIManager Current => _instance;
 
         public UIRuntimeHost RuntimeHost => _host;
-        public int OpenCount
+        public int OpenCount => _order.Count;
+
+        public IReadOnlyList<UIPageResourceUsage> GetResourceSnapshot()
         {
-            get
+            var pages = new List<UIPageResourceUsage>(_order.Count);
+            foreach (Window window in _order)
             {
-                PruneDestroyedDisplays();
-                return _openOrder.Count;
+                UIDisplay display = window.Display;
+                if (display == null) continue;
+                bool prefabHeld = window.Lease.IsValid;
+                int leases = prefabHeld ? 1 : 0;
+                long bytes = prefabHeld ? window.Lease.Entry.Bytes : 0;
+                foreach (UIBindingRoot binding in display.GetComponentsInChildren<UIBindingRoot>(true))
+                    binding.RuntimeView?.AddResourceUsage(ref leases, ref bytes);
+                pages.Add(new UIPageResourceUsage(window.View.GetType(), display.gameObject.activeInHierarchy, leases, bytes));
             }
+            return pages;
         }
-        public int PreloadedCount => _preloaded.Count;
-        public IReadOnlyList<UIDisplay> OpenDisplays
-        {
-            get
-            {
-                PruneDestroyedDisplays();
-                return _openDisplays;
-            }
-        }
-        public UIDisplay TopDisplay => FindTopVisible();
-        public UIView TopView => TopDisplay?.View;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-        private static void ResetStatics()
+        private static void Reset()
         {
-            _instance = null;
+            Current = null;
             _quitting = false;
-        }
-
-        internal static UIManager UseHost(UIRuntimeHost host)
-        {
-            if (host == null || _quitting) return null;
-            if (_instance == null) _instance = new UIManager();
-            if (_instance._host == null) _instance.AttachHost(host);
-            return _instance;
         }
 
         internal static bool TryAttachHost(UIRuntimeHost host, out UIManager manager)
         {
-            manager = UseHost(host);
-            if (manager != null && manager._host == host) return true;
             manager = null;
-            return false;
-        }
-
-        internal static void NotifyApplicationQuit() => _quitting = true;
-
-        public RectTransform GetLayerRoot(UILayer layer)
-        {
-            EnsureHost();
-            if (_host == null) return null;
-            if (_layerRoots.Count == 0) BuildLayerRoots();
-            return _layerRoots.TryGetValue(layer, out var root) && root != null ? root : CreateLayerRoot(layer);
-        }
-
-        public async Task<bool> PreloadAsync(string location)
-        {
-            ValidateLocation(location);
-            if (_preloaded.TryGetValue(location, out var current) && current != null && current.IsValid) return true;
-            AssetLease<GameObject> lease = await RequireAssets().AcquireAsync<GameObject>(location);
-            if (lease == null || lease.Asset == null) return false;
-            if (_shuttingDown || _quitting)
+            if (_quitting || (Current != null && Current._host != host)) return false;
+            if (Current == null)
             {
-                lease.Dispose();
-                return false;
+                Current = new UIManager { _host = host };
+                host.SetManager(Current);
+                Current.RefreshCanvasSettings(host);
             }
-            if (_preloaded.TryGetValue(location, out current) && current != null && current.IsValid)
-            {
-                lease.Dispose();
-                return true;
-            }
-            current?.Dispose();
-            _preloaded[location] = lease;
+            manager = Current;
             return true;
         }
 
-        public bool IsPreloaded(string location) =>
-            !string.IsNullOrWhiteSpace(location) && _preloaded.TryGetValue(location, out var lease) &&
-            lease != null && lease.IsValid;
-
-        public bool ReleasePreloaded(string location)
+        internal static void NotifyApplicationQuit()
         {
-            if (string.IsNullOrWhiteSpace(location) || !_preloaded.TryGetValue(location, out var lease)) return false;
-            _preloaded.Remove(location);
-            lease?.Dispose();
-            return true;
-        }
-
-        public void ReleaseAllPreloaded()
-        {
-            foreach (var lease in _preloaded.Values) lease?.Dispose();
-            _preloaded.Clear();
-        }
-
-        public UIView Open(GameObject prefab, object args = null, UILayer? layer = null)
-        {
-            if (prefab == null) throw new ArgumentNullException(nameof(prefab));
-            EnsureAvailable();
-            return OpenPrefab(prefab, args, layer, out _).View;
-        }
-
-        public T Open<T>(GameObject prefab, object args = null, UILayer? layer = null) where T : UIView
-        {
-            UIView view = Open(prefab, args, layer);
-            if (view is T typed) return typed;
-            throw new InvalidOperationException($"UI prefab '{prefab.name}' created {view?.GetType().Name}, expected {typeof(T).Name}.");
-        }
-
-        public UIView OpenInstance(UIDisplay display, object args = null, UILayer? layer = null)
-        {
-            if (display == null) throw new ArgumentNullException(nameof(display));
-            EnsureAvailable();
-            UILayer targetLayer = layer ?? display.DefaultLayer;
-            string key = ResolveKey(display, display.gameObject.name);
-            if (display.SingleInstance && TryGetOpen(key, out var existing) && existing != display)
-                return ActivateExisting(existing, args, targetLayer).View;
-            RegisterOpenedDisplay(display, key, targetLayer, args);
-            return display.View;
-        }
-
-        public async Task<T> OpenAsync<T>(
-            string location,
-            object args = null,
-            UILayer? layer = null,
-            CancellationToken cancellationToken = default(CancellationToken))
-            where T : UIView
-        {
-            ValidateLocation(location);
-            cancellationToken.ThrowIfCancellationRequested();
-            EnsureAvailable();
-            AssetLease<GameObject> lease = await RequireAssets().AcquireAsync<GameObject>(location);
-            if (lease == null || lease.Asset == null) return null;
-            if (cancellationToken.IsCancellationRequested)
-            {
-                lease.Dispose();
-                cancellationToken.ThrowIfCancellationRequested();
-            }
-            if (_shuttingDown || _quitting || _host == null)
-            {
-                lease.Dispose();
-                return null;
-            }
-            try
-            {
-                UIDisplay opened = OpenPrefab(lease.Asset, args, layer, out bool created);
-                if (!(opened.View is T typed))
-                {
-                    if (created) Close(opened);
-                    throw new InvalidOperationException(
-                        $"UI prefab '{location}' created {opened.View?.GetType().Name}, expected {typeof(T).Name}.");
-                }
-                if (!created) lease.Dispose();
-                else _assetLeases[opened] = lease;
-                return typed;
-            }
-            catch
-            {
-                lease.Dispose();
-                throw;
-            }
-        }
-
-        /// <summary>使用 TView 上记录的 Prefab 地址打开界面。</summary>
-        public Task<TView> OpenAsync<TView>(UILayer? layer = null) where TView : UIView =>
-            OpenGeneratedAsync<TView>(null, layer);
-
-        public Task<TView> OpenAsync<TView, TArgs>(TArgs args, UILayer? layer = null)
-            where TView : UIView => OpenGeneratedAsync<TView>(args, layer);
-
-        public Task<UIView> OpenAsync(string location, object args = null, UILayer? layer = null) =>
-            OpenAsync<UIView>(location, args, layer);
-
-        public async Task<TView> OpenGeneratedAsync<TView>(
-            object args = null,
-            UILayer? layer = null,
-            CancellationToken cancellationToken = default(CancellationToken))
-            where TView : UIView
-        {
-            if (!UIFactory.TryGetPrefabLocation<TView>(out string location))
-                throw new InvalidOperationException(
-                    $"No generated prefab location is registered for {typeof(TView).FullName}. Regenerate its binding script.");
-            return await OpenAsync<TView>(location, args, layer, cancellationToken);
-        }
-
-        public bool Close(UIView view) => view != null && Close(view.Display);
-
-        public bool Close(UIDisplay display)
-        {
-            if (display == null || !_openOrder.Remove(display)) return false;
-            RemoveSingleton(display);
-            display.CloseInternal();
-            FocusTop();
-            RefreshBackground();
-
-            void DestroyClosedDisplay()
-            {
-                display.gameObject.SetActive(false);
-                ReleaseDisplayLease(display);
-                display.DisposeContent();
-                DestroyUnityObject(display.gameObject);
-            }
-
-            var transition = display.GetComponent<UITransition>();
-            if (Application.isPlaying && transition != null) transition.PlayClose(DestroyClosedDisplay);
-            else DestroyClosedDisplay();
-            return true;
-        }
-
-        public bool Close(string viewId)
-        {
-            if (string.IsNullOrWhiteSpace(viewId)) return false;
-            if (_singletons.TryGetValue(viewId, out var exact)) return Close(exact);
-            for (int i = _openOrder.Count - 1; i >= 0; i--)
-            {
-                UIDisplay display = _openOrder[i];
-                if (display != null && (display.ViewId == viewId || display.name == viewId)) return Close(display);
-            }
-            return false;
-        }
-
-        public bool Close<T>() where T : UIView
-        {
-            T view = Get<T>();
-            return view != null && Close(view);
-        }
-
-        public bool Back()
-        {
-            UIDisplay top = FindTopVisible(true);
-            return top != null && Close(top);
-        }
-
-        public bool CloseTop()
-        {
-            UIDisplay top = FindTopVisible();
-            return top != null && Close(top);
-        }
-
-        public void CloseLayer(UILayer layer)
-        {
-            var snapshot = _openOrder.ToArray();
-            for (int i = snapshot.Length - 1; i >= 0; i--)
-                if (snapshot[i] != null && snapshot[i].CurrentLayer == layer) Close(snapshot[i]);
-        }
-
-        public void CloseAll()
-        {
-            var snapshot = _openOrder.ToArray();
-            for (int i = snapshot.Length - 1; i >= 0; i--)
-                if (snapshot[i] != null) Close(snapshot[i]);
-        }
-
-        public T Get<T>() where T : UIView
-        {
-            for (int i = _openOrder.Count - 1; i >= 0; i--)
-                if (_openOrder[i] != null && _openOrder[i].View is T typed) return typed;
-            return null;
-        }
-
-        public bool TryGet<T>(out T view) where T : UIView
-        {
-            view = Get<T>();
-            return view != null;
-        }
-
-        public bool TryGet(string viewId, out UIView view)
-        {
-            if (_singletons.TryGetValue(viewId, out var exact) && exact != null)
-            {
-                view = exact.View;
-                return true;
-            }
-            for (int i = _openOrder.Count - 1; i >= 0; i--)
-            {
-                UIDisplay display = _openOrder[i];
-                if (display != null && (display.ViewId == viewId || display.name == viewId))
-                {
-                    view = display.View;
-                    return true;
-                }
-            }
-            view = null;
-            return false;
-        }
-
-        public void BringToFront(UIView view) => BringToFront(view?.Display);
-
-        public void BringToFront(UIDisplay display)
-        {
-            if (display == null || !_openOrder.Remove(display)) return;
-            _openOrder.Add(display);
-            display.transform.SetAsLastSibling();
-            if (!display.gameObject.activeSelf) display.gameObject.SetActive(true);
-            FocusTop();
-            RefreshBackground();
-        }
-
-        public void SetLayer(UIView view, UILayer layer) => SetLayer(view?.Display, layer);
-
-        public void SetLayer(UIDisplay display, UILayer layer)
-        {
-            if (display == null || !_openOrder.Contains(display)) return;
-            display.CurrentLayer = layer;
-            display.transform.SetParent(GetLayerRoot(layer), false);
-            ApplyLayout(display);
-            BringToFront(display);
-        }
-
-        public void Hide(UIView view) => Hide(view?.Display);
-
-        public void Hide(UIDisplay display)
-        {
-            if (display == null || !_openOrder.Contains(display) || !display.gameObject.activeSelf) return;
-            display.BlurInternal();
-            display.gameObject.SetActive(false);
-            FocusTop();
-            RefreshBackground();
-        }
-
-        public void Show(UIView view) => Show(view?.Display);
-
-        public void Show(UIDisplay display)
-        {
-            if (display == null || !_openOrder.Contains(display)) return;
-            if (!display.gameObject.activeSelf) display.gameObject.SetActive(true);
-            BringToFront(display);
-            display.GetComponent<UITransition>()?.PlayOpen();
-        }
-
-        internal void NotifyViewDestroyed(UIDisplay display)
-        {
-            // Unity 对象执行 OnDestroy 时会与 null 比较相等；这里必须使用
-            // ReferenceEquals，才能继续移除这条已经失效的记录。
-            if (_shuttingDown || ReferenceEquals(display, null)) return;
-            _openOrder.Remove(display);
-            RemoveSingleton(display);
-            ReleaseDisplayLease(display);
-            FocusTop();
-            RefreshBackground();
+            _quitting = true;
+            Current?.Stop();
         }
 
         internal static void ReleaseHost(UIRuntimeHost host)
         {
-            UIManager manager = _instance;
-            if (manager == null || !ReferenceEquals(manager._host, host)) return;
-            manager.ShutdownInternal();
-            manager._host = null;
-            _instance = null;
+            if (Current == null || !ReferenceEquals(Current._host, host)) return;
+            Current.Stop();
+            Current = null;
         }
 
-        internal void RefreshCanvasSettings(UIRuntimeHost host)
-        {
-            if (_host != host || _shuttingDown) return;
-            EnsureRootCanvas();
-            int unityLayer = _host.UILayer;
-            foreach (RectTransform root in _layerRoots.Values)
-                if (root != null) SetUnityLayerRecursively(root, unityLayer);
-        }
+        public T Get<T>() where T : UIView =>
+            _windows.TryGetValue(typeof(T), out Window window) && !window.Retiring ? (T)window.View : null;
 
-        private UIDisplay OpenPrefab(GameObject prefab, object args, UILayer? layer, out bool created)
-        {
-            PruneDestroyedDisplays();
-            UIDisplay prefabDisplay = prefab.GetComponent<UIDisplay>();
-            if (prefabDisplay == null)
-                throw new InvalidOperationException($"UI prefab '{prefab.name}' must contain UIDisplay on its root.");
-            if (!prefabDisplay.ManagedAsView)
-                throw new InvalidOperationException($"UI prefab '{prefab.name}' is marked as an Item, not a managed View.");
+        internal Task<T> OpenAsync<T>(object args, UIPageKind kind, CancellationToken token, Action<T> prepare = null)
+            where T : UIView, new() => kind == UIPageKind.Screen
+                ? OpenScreenAsync<T>(args, token)
+                : OpenCoreAsync(args, kind, token, prepare);
 
-            UILayer targetLayer = layer ?? prefabDisplay.DefaultLayer;
-            string key = ResolveKey(prefabDisplay, prefab.name);
-            if (prefabDisplay.SingleInstance && TryGetOpen(key, out var existing))
+        private async Task<T> OpenScreenAsync<T>(object args, CancellationToken token) where T : UIView, new()
+        {
+            EnsureAvailable(token);
+            using var request = CancellationTokenSource.CreateLinkedTokenSource(token);
+            CancellationTokenSource previous = _screenRequest;
+            _screenRequest = request;
+            previous?.Cancel();
+            try { return await OpenCoreAsync<T>(args, UIPageKind.Screen, request.Token, null); }
+            finally
             {
-                created = false;
-                return ActivateExisting(existing, args, targetLayer);
+                if (ReferenceEquals(_screenRequest, request)) _screenRequest = null;
             }
+        }
 
-            GameObject instanceObject = Object.Instantiate(prefab, GetLayerRoot(targetLayer), false);
-            instanceObject.name = prefab.name;
-            var instance = instanceObject.GetComponent<UIDisplay>();
+        private async Task<T> OpenCoreAsync<T>(object args, UIPageKind kind, CancellationToken token, Action<T> prepare)
+            where T : UIView, new()
+        {
+            EnsureAvailable(token);
+            Type type = typeof(T);
+            if (_windows.TryGetValue(type, out Window existing) && !existing.Display.IsClosing)
+                return PresentExisting(existing, args, prepare);
+
+            string address = AddressOf(type);
+            AssetLease<GameObject> lease = await RequireAssets().AcquireAsync<GameObject>(address, token);
             try
             {
-                RegisterOpenedDisplay(instance, key, targetLayer, args);
-                created = true;
-                return instance;
+                while (_windows.TryGetValue(type, out existing))
+                {
+                    EnsureAvailable(token);
+                    if (!existing.Display.IsClosing) return PresentExisting(existing, args, prepare);
+                    await WaitForCloseAsync(existing, token);
+                }
+                EnsureAvailable(token);
+                UIDisplay template = lease.Asset.GetComponent<UIDisplay>();
+                if (template == null || template.Kind != kind ||
+                    !string.Equals(template.PrefabLocation, address, StringComparison.Ordinal) ||
+                    UIFactory.ResolveType(template.ViewTypeName) != type)
+                    throw new InvalidOperationException($"{type.Name} 的 Prefab 类型、用途或资源地址不匹配。");
+
+                UILayer layer = kind == UIPageKind.Popup ? UILayer.Popup : UILayer.Screen;
+                var view = new T();
+                UIDisplay display = InstantiateHidden(template, GetLayerRoot(layer));
+                display.name = template.name;
+                SetLayer(display.transform, _host.UILayer);
+                var window = new Window { Display = display, View = view, Lease = lease, Kind = kind };
+                lease = null;
+                _windows.Add(type, window);
+                _order.Add(window);
+                display.Attach(this, view);
+                try
+                {
+                    prepare?.Invoke(view);
+                    view.SetArguments(args);
+                    view.Initialize(display);
+                    EnsureAvailable(token);
+                    if (!display.IsClosing)
+                    {
+                        Present(window);
+                        if (!display.IsClosing && display.gameObject.activeSelf)
+                            display.GetComponent<UITransition>()?.PlayOpen();
+                    }
+                }
+                catch
+                {
+                    Retire(window);
+                    throw;
+                }
+                return view;
+            }
+            finally { lease?.Dispose(); }
+        }
+
+        private UIDisplay InstantiateHidden(UIDisplay template, RectTransform layer)
+        {
+            if (!template.gameObject.activeSelf) return Object.Instantiate(template, layer, false);
+            if (_inactiveRoot == null)
+            {
+                var staging = new GameObject("[UI Staging]", typeof(RectTransform));
+                staging.SetActive(false);
+                _inactiveRoot = staging.transform;
+                _inactiveRoot.SetParent(_host.transform, false);
+            }
+            UIDisplay display = Object.Instantiate(template, _inactiveRoot, false);
+            display.gameObject.SetActive(false);
+            display.transform.SetParent(layer, false);
+            return display;
+        }
+
+        private T PresentExisting<T>(Window window, object args, Action<T> prepare) where T : UIView
+        {
+            var view = (T)window.View;
+            prepare?.Invoke(view);
+            try
+            {
+                view.SetArguments(args);
+                _order.Remove(window);
+                _order.Add(window);
+                Present(window);
+                return view;
             }
             catch
             {
-                _openOrder.Remove(instance);
-                RemoveSingleton(instance);
-                DestroyUnityObject(instanceObject);
-                created = false;
+                Retire(window);
                 throw;
             }
         }
 
-        private void RegisterOpenedDisplay(UIDisplay display, string key, UILayer layer, object args)
+        private void Present(Window window)
         {
-            display.transform.SetParent(GetLayerRoot(layer), false);
-            RemoveRootCanvasComponents(display);
-            SetUnityLayerRecursively(display.transform, _host.UILayer);
-            display.Initialize(this, layer);
-            ApplyLayout(display);
-            if (!_openOrder.Contains(display)) _openOrder.Add(display);
-            if (display.SingleInstance) _singletons[key] = display;
-            display.OpenInternal(args);
-            display.transform.SetAsLastSibling();
-            display.GetComponent<UITransition>()?.PlayOpen();
-            FocusTop();
-            RefreshBackground();
+            window.Display.transform.SetAsLastSibling();
+            if (window.Kind == UIPageKind.Screen)
+                SyncScreens(window);
+            else
+                Reveal(window);
+            SyncBackdrop();
         }
 
-        private UIDisplay ActivateExisting(UIDisplay display, object args, UILayer layer)
+        public Task BackAsync()
         {
-            if (display.CurrentLayer != layer) SetLayer(display, layer);
-            if (!display.gameObject.activeSelf) display.gameObject.SetActive(true);
-            display.OpenInternal(args);
-            BringToFront(display);
-            display.GetComponent<UITransition>()?.PlayOpen();
-            return display;
-        }
-
-        private bool TryGetOpen(string key, out UIDisplay display)
-        {
-            if (_singletons.TryGetValue(key, out display) && display != null) return true;
-            if (display == null) _singletons.Remove(key);
-            return false;
-        }
-
-        private void RemoveSingleton(UIDisplay display)
-        {
-            string removeKey = null;
-            foreach (var pair in _singletons)
-                if (ReferenceEquals(pair.Value, display)) { removeKey = pair.Key; break; }
-            if (removeKey != null) _singletons.Remove(removeKey);
-        }
-
-        private static string ResolveKey(UIDisplay display, string fallbackName)
-        {
-            if (display != null && !string.IsNullOrWhiteSpace(display.ViewId)) return display.ViewId;
-            string logicType = display?.ViewTypeName;
-            return $"{logicType ?? typeof(UIView).FullName}:{fallbackName}";
-        }
-
-        private UIDisplay FindTopVisible(bool requireCloseOnBack = false, bool requireBackground = false)
-        {
-            UIDisplay result = null;
-            int highestLayer = int.MinValue;
-            int highestIndex = -1;
-            for (int i = 0; i < _openOrder.Count; i++)
+            Window window = Top(UIPageKind.Popup);
+            if (window == null)
             {
-                UIDisplay display = _openOrder[i];
-                if (display == null || !display.IsOpen || !display.gameObject.activeSelf) continue;
-                if (requireCloseOnBack && !display.CloseOnBack) continue;
-                if (requireBackground && !display.UsesBackground) continue;
-                int visualLayer = (int)display.CurrentLayer;
-                if (visualLayer < highestLayer || (visualLayer == highestLayer && i < highestIndex)) continue;
-                result = display;
-                highestLayer = visualLayer;
-                highestIndex = i;
+                if (CancelScreenOpen()) return Task.CompletedTask;
+                window = Top(UIPageKind.Screen);
             }
-            return result;
+            return window != null && window.Display.CloseOnBack ? Close(window) : Task.CompletedTask;
         }
 
-        private void FocusTop()
+        private bool CancelScreenOpen()
         {
-            UIDisplay top = FindTopVisible();
-            for (int i = 0; i < _openOrder.Count; i++)
-                if (_openOrder[i] != null && _openOrder[i] != top) _openOrder[i].BlurInternal();
-            top?.FocusInternal();
+            CancellationTokenSource request = _screenRequest;
+            _screenRequest = null;
+            request?.Cancel();
+            return request != null;
         }
 
-        private void RefreshBackground()
+        private static async Task WaitForCloseAsync(Window window, CancellationToken token)
         {
-            UIDisplay owner = FindTopVisible(requireBackground: true);
-            if (owner == null)
+            var canceled = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            using var registration = token.Register(() => canceled.TrySetResult(true));
+            await Task.WhenAny(window.Closed.Task, canceled.Task);
+            token.ThrowIfCancellationRequested();
+        }
+
+        internal Task CloseAsync(UIDisplay display)
+        {
+            Window window = Find(display);
+            return window == null ? Task.CompletedTask : Close(window);
+        }
+
+        private Task Close(Window window)
+        {
+            UIDisplay display = window.Display;
+            if (display.IsClosing) return window.Closed.Task;
+            display.IsClosing = true;
+            Suspend(window);
+            if (display == null) Retire(window);
+            else
+            {
+                var transition = display.GetComponent<UITransition>();
+                if (Application.isPlaying && display.gameObject.activeInHierarchy && transition != null)
+                {
+                    try { transition.PlayClose(() => Retire(window)); }
+                    catch (Exception exception)
+                    {
+                        Log.Error("[UI] 退场失败。", exception);
+                        Retire(window);
+                    }
+                }
+                else Retire(window);
+            }
+            return window.Closed.Task;
+        }
+
+        internal void NotifyDestroyed(UIDisplay display)
+        {
+            Window window = Find(display);
+            if (window != null) Retire(window, destroy: false);
+        }
+
+        private void Retire(Window window, bool destroy = true)
+        {
+            if (window.Retiring) return;
+            window.Retiring = true;
+            window.Display.IsClosing = true;
+            _order.Remove(window);
+            if (destroy && window.Display != null)
+            {
+                window.Display.gameObject.SetActive(false);
+                window.Display.DisposeContent();
+                Destroy(window.Display.gameObject);
+            }
+
+            if (!_stopping && Application.isPlaying && _host != null)
+                _host.DisposeAfterFrame(new ActionDisposable(() => Finish(window)));
+            else
+                Finish(window);
+
+            if (_stopping) return;
+            try { SyncScreens(); SyncBackdrop(); }
+            catch (Exception exception) { Log.Error("[UI] 恢复上一界面失败。", exception); }
+        }
+
+        private void Finish(Window window)
+        {
+            if (window.Finished) return;
+            window.Finished = true;
+            _windows.Remove(window.View.GetType());
+            try { window.Lease.Dispose(); }
+            catch (Exception exception) { Log.Error("[UI] Prefab 释放失败。", exception); }
+            finally
+            {
+                window.View.CompleteResult();
+                window.Closed.TrySetResult(true);
+            }
+        }
+
+        private void SyncScreens(Window refresh = null)
+        {
+            Window top = Top(UIPageKind.Screen);
+            foreach (Window page in _order.ToArray())
+            {
+                if (page.Kind != UIPageKind.Screen || page == top || page.Display == null ||
+                    page.Display.IsClosing || !page.Display.gameObject.activeSelf) continue;
+                Suspend(page);
+                if (page.Display != null && !page.Display.IsClosing) page.Display.gameObject.SetActive(false);
+            }
+            if (top != null && top.Display != null && !top.Display.IsClosing &&
+                (top == refresh || !top.Display.gameObject.activeSelf) && Top(UIPageKind.Screen) == top)
+                Reveal(top);
+        }
+
+        private static void Reveal(Window window)
+        {
+            window.Display.gameObject.SetActive(true);
+            if (window.Display != null && !window.Display.IsClosing) window.View.RefreshView();
+        }
+
+        private static void Suspend(Window window)
+        {
+            try { window.View.Suspend(); }
+            catch (Exception exception) { Log.Error("[UI] 隐藏界面失败。", exception); }
+        }
+
+        private Window Top(UIPageKind kind)
+        {
+            for (int i = _order.Count - 1; i >= 0; i--)
+                if (_order[i].Display != null && _order[i].Kind == kind) return _order[i];
+            return null;
+        }
+
+        private Window Find(UIDisplay display)
+        {
+            foreach (Window window in _windows.Values)
+                if (ReferenceEquals(window.Display, display)) return window;
+            return null;
+        }
+
+        private void SyncBackdrop()
+        {
+            Window popup = Top(UIPageKind.Popup);
+            if (popup == null)
             {
                 if (_background != null) _background.gameObject.SetActive(false);
                 return;
             }
-            EnsureBackground();
-            Transform parent = GetLayerRoot(owner.CurrentLayer);
-            _background.transform.SetParent(parent, false);
-            Stretch((RectTransform)_background.transform);
+            if (_background == null)
+            {
+                RectTransform layer = GetLayerRoot(UILayer.Popup);
+                GameObject root = _host.BackgroundPrefab != null
+                    ? Object.Instantiate(_host.BackgroundPrefab, layer, false)
+                    : new GameObject("[Popup Background]", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image), typeof(Button));
+                if (!(root.transform is RectTransform rect))
+                {
+                    Destroy(root);
+                    throw new InvalidOperationException("弹窗遮罩 Prefab 的根节点需要 RectTransform。");
+                }
+                rect.SetParent(layer, false);
+                Stretch(rect);
+                SetLayer(rect, _host.UILayer);
+                _background = root.GetComponent<UIBackground>() ?? root.AddComponent<UIBackground>();
+            }
             _background.gameObject.SetActive(true);
-            _background.Configure(
-                owner.BackgroundColor,
-                owner.BackgroundMode == UIBackgroundMode.Modal,
-                owner.CloseOnBackground ? (Action)(() => Close(owner)) : null);
-            _background.transform.SetSiblingIndex(Mathf.Max(0, owner.transform.GetSiblingIndex()));
-            owner.transform.SetAsLastSibling();
+            _background.transform.SetAsLastSibling();
+            popup.Display.transform.SetAsLastSibling();
+            _background.Configure(popup.Display.BackgroundColor, true,
+                popup.Display.CloseOnBackground && !popup.Display.IsClosing ? () => _ = Close(popup) : null);
         }
 
-        private void EnsureBackground()
+        private void Stop()
         {
-            if (_background != null) return;
-            GameObject background;
-            if (_host != null && _host.BackgroundPrefab != null)
-                background = Object.Instantiate(_host.BackgroundPrefab);
-            else
-                background = new GameObject(
-                    "[Background]", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image), typeof(Button));
-            if (!(background.transform is RectTransform))
-                throw new InvalidOperationException("UI shared Background prefab root must use RectTransform.");
-            SetUnityLayerRecursively(background.transform, _host.UILayer);
-            _background = background.GetComponent<UIBackground>() ?? background.AddComponent<UIBackground>();
-            background.SetActive(false);
-        }
-
-        private void ReleaseDisplayLease(UIDisplay display)
-        {
-            if (!_assetLeases.TryGetValue(display, out var lease)) return;
-            _assetLeases.Remove(display);
-            if (_host != null && Application.isPlaying) _host.DisposeAfterFrame(lease);
-            else lease.Dispose();
-        }
-
-        private void PruneDestroyedDisplays()
-        {
-            for (int i = _openOrder.Count - 1; i >= 0; i--)
+            if (_stopping) return;
+            _stopping = true;
+            CancelScreenOpen();
+            foreach (Window window in new List<Window>(_windows.Values))
             {
-                UIDisplay display = _openOrder[i];
-                if (display != null) continue;
-                _openOrder.RemoveAt(i);
-                ReleaseDisplayLease(display);
+                Retire(window);
+                Finish(window);
             }
-
-            List<string> deadSingletons = null;
-            foreach (var pair in _singletons)
-            {
-                if (pair.Value != null) continue;
-                if (deadSingletons == null) deadSingletons = new List<string>();
-                deadSingletons.Add(pair.Key);
-            }
-            if (deadSingletons == null) return;
-            for (int i = 0; i < deadSingletons.Count; i++)
-                _singletons.Remove(deadSingletons[i]);
         }
 
-        private static void ApplyLayout(UIDisplay display)
+        private void EnsureAvailable(CancellationToken token)
         {
-            if (display.StretchToLayer && display.transform is RectTransform rect) Stretch(rect);
+            token.ThrowIfCancellationRequested();
+            if (_stopping || _quitting || _host == null) throw new ObjectDisposedException(nameof(UIManager));
         }
 
-        private static void SetUnityLayerRecursively(Transform root, int layer)
+        internal static AssetModule RequireAssets() => AssetModule.Instance ??
+            throw new InvalidOperationException("请在 Startup Config 配置 UI 资源包。");
+
+        internal static string AddressOf(Type type)
         {
-            if (root == null) return;
-            root.gameObject.layer = layer;
-            for (int i = 0; i < root.childCount; i++)
-                SetUnityLayerRecursively(root.GetChild(i), layer);
+            string address = UIFactory.Address(type);
+            if (!string.IsNullOrWhiteSpace(address)) return address;
+            throw new InvalidOperationException($"{type.Name} 缺少 UI 资源地址。");
         }
 
-        private static void RemoveRootCanvasComponents(UIDisplay display)
+        public RectTransform GetLayerRoot(UILayer layer)
         {
-            // 受管理 View 复用框架创建的分层 Canvas。Prefab 根节点残留的独立
-            // Canvas（尤其是 World Space）会脱离该渲染链；子节点 Canvas 不处理。
-            GraphicRaycaster raycaster = display.GetComponent<GraphicRaycaster>();
-            if (raycaster != null)
-            {
-                raycaster.enabled = false;
-                DestroyUnityObject(raycaster);
-            }
+            if (_layers.TryGetValue(layer, out RectTransform rect) && rect != null) return rect;
+            var root = new GameObject($"[{layer}]", typeof(RectTransform), typeof(Canvas), typeof(GraphicRaycaster));
+            rect = (RectTransform)root.transform;
+            rect.SetParent(_host.transform, false);
+            Stretch(rect);
+            root.layer = _host.UILayer;
+            var canvas = root.GetComponent<Canvas>();
+            canvas.overrideSorting = true;
+            canvas.sortingOrder = (int)layer;
+            _layers[layer] = rect;
+            return rect;
+        }
 
-            CanvasScaler scaler = display.GetComponent<CanvasScaler>();
-            if (scaler != null)
-            {
-                scaler.enabled = false;
-                DestroyUnityObject(scaler);
-            }
-
-            Canvas canvas = display.GetComponent<Canvas>();
-            if (canvas == null) return;
-            canvas.enabled = false;
-            DestroyUnityObject(canvas);
+        internal void RefreshCanvasSettings(UIRuntimeHost host)
+        {
+            if (_host != host) return;
+            var canvas = host.GetComponent<Canvas>();
+            canvas.renderMode = host.RenderMode == UIRenderMode.ScreenSpaceCamera
+                ? RenderMode.ScreenSpaceCamera : RenderMode.ScreenSpaceOverlay;
+            canvas.worldCamera = host.ResolveUICamera();
+            canvas.planeDistance = host.PlaneDistance;
+            var scaler = host.GetComponent<CanvasScaler>();
+            scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+            scaler.referenceResolution = host.ReferenceResolution;
+            scaler.screenMatchMode = CanvasScaler.ScreenMatchMode.MatchWidthOrHeight;
+            scaler.matchWidthOrHeight = host.MatchWidthOrHeight;
+            SetLayer(host.transform, host.UILayer);
         }
 
         private static void Stretch(RectTransform rect)
         {
             rect.anchorMin = Vector2.zero;
             rect.anchorMax = Vector2.one;
-            rect.offsetMin = Vector2.zero;
-            rect.offsetMax = Vector2.zero;
-            rect.localScale = Vector3.one;
+            rect.offsetMin = rect.offsetMax = Vector2.zero;
         }
 
-        private void EnsureAvailable()
+        private static void SetLayer(Transform node, int layer)
         {
-            if (_shuttingDown || _quitting) throw new InvalidOperationException("UIManager is shutting down.");
-            EnsureHost();
-            if (_host == null) throw new InvalidOperationException("UIRuntimeHost could not be created.");
+            node.gameObject.layer = layer;
+            foreach (Transform child in node) SetLayer(child, layer);
         }
 
-        private void EnsureHost()
+        private static void Destroy(GameObject target)
         {
-            if (_host != null || _shuttingDown || _quitting) return;
-            var existing = Object.FindObjectOfType<UIRuntimeHost>(true);
-            if (existing != null) { AttachHost(existing); return; }
-            // 先创建完整 Canvas 组件栈，再由 UIRuntimeHost.Awake 关联 Manager，
-            // 避免编辑模式或启动阶段首次创建层级根节点时发生 AddComponent/OnValidate 重入。
-            var hostObject = new GameObject(
-                "[UI]",
-                typeof(RectTransform),
-                typeof(Canvas),
-                typeof(CanvasScaler),
-                typeof(GraphicRaycaster));
-            var host = hostObject.AddComponent<UIRuntimeHost>();
-            if (_host == null) AttachHost(host);
-        }
-
-        private void AttachHost(UIRuntimeHost host)
-        {
-            if (host == null || (_host != null && _host != host)) return;
-            _host = host;
-            host.SetManager(this);
-            _shuttingDown = false;
-            BuildLayerRoots();
-        }
-
-        private void ShutdownInternal()
-        {
-            if (_shuttingDown) return;
-            _shuttingDown = true;
-            for (int i = _openOrder.Count - 1; i >= 0; i--)
-                if (_openOrder[i] != null) _openOrder[i].CloseInternal();
-            foreach (var lease in _assetLeases.Values) lease?.Dispose();
-            _assetLeases.Clear();
-            ReleaseAllPreloaded();
-            _openOrder.Clear();
-            _singletons.Clear();
-            _layerRoots.Clear();
-            _background = null;
-        }
-
-        private void BuildLayerRoots()
-        {
-            if (_host == null) return;
-            EnsureRootCanvas();
-            _layerRoots.Clear();
-            foreach (UILayer layer in Enum.GetValues(typeof(UILayer))) CreateLayerRoot(layer);
-        }
-
-        private void EnsureRootCanvas()
-        {
-            if (_host == null) return;
-            GameObject root = _host.gameObject;
-            var canvas = root.GetComponent<Canvas>() ?? root.AddComponent<Canvas>();
-            canvas.renderMode = _host.RenderMode == UIRenderMode.ScreenSpaceCamera
-                ? RenderMode.ScreenSpaceCamera
-                : RenderMode.ScreenSpaceOverlay;
-            canvas.worldCamera = _host.ResolveUICamera();
-            canvas.planeDistance = _host.PlaneDistance;
-            root.layer = _host.UILayer;
-            var scaler = root.GetComponent<CanvasScaler>() ?? root.AddComponent<CanvasScaler>();
-            scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-            scaler.referenceResolution = _host.ReferenceResolution;
-            scaler.screenMatchMode = CanvasScaler.ScreenMatchMode.MatchWidthOrHeight;
-            scaler.matchWidthOrHeight = _host.MatchWidthOrHeight;
-            if (root.GetComponent<GraphicRaycaster>() == null) root.AddComponent<GraphicRaycaster>();
-        }
-
-        private RectTransform CreateLayerRoot(UILayer layer)
-        {
-            if (_host == null) return null;
-            if (_layerRoots.TryGetValue(layer, out var existing) && existing != null) return existing;
-            string layerName = $"[{layer}]";
-            Transform found = _host.transform.Find(layerName);
-            GameObject layerObject = found == null
-                ? new GameObject(layerName, typeof(RectTransform), typeof(Canvas), typeof(GraphicRaycaster))
-                : found.gameObject;
-            if (found == null) layerObject.transform.SetParent(_host.transform, false);
-            layerObject.layer = _host.UILayer;
-            var rect = (RectTransform)layerObject.transform;
-            Stretch(rect);
-            var canvas = layerObject.GetComponent<Canvas>() ?? layerObject.AddComponent<Canvas>();
-            canvas.overrideSorting = true;
-            canvas.sortingOrder = (int)layer;
-            if (layerObject.GetComponent<GraphicRaycaster>() == null) layerObject.AddComponent<GraphicRaycaster>();
-            _layerRoots[layer] = rect;
-            return rect;
-        }
-
-        private static AssetModule RequireAssets()
-        {
-            var assets = AssetModule.Instance;
-            if (assets == null || !assets.IsReady)
-                throw new InvalidOperationException(
-                    "AssetModule is not ready. Register its loader and await InitializeAsync before loading UI.");
-            return assets;
-        }
-
-        private static void ValidateLocation(string location)
-        {
-            if (string.IsNullOrWhiteSpace(location))
-                throw new ArgumentException("UI prefab location is required.", nameof(location));
-        }
-
-        private static void DestroyUnityObject(Object target)
-        {
-            if (target == null) return;
             if (Application.isPlaying) Object.Destroy(target);
             else Object.DestroyImmediate(target);
         }

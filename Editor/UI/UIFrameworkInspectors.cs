@@ -89,9 +89,37 @@ namespace EasyFramework.Editor.UI
 
             DrawSection("运行环境");
             EditorGUILayout.PropertyField(serializedObject.FindProperty("_runtimeMode"), new GUIContent("运行模式"));
+            DrawAssetSettings();
             DrawSection("全局 Loading");
             EditorGUILayout.PropertyField(serializedObject.FindProperty("_loading"), GUIContent.none, true);
             serializedObject.ApplyModifiedProperties();
+        }
+
+        private void DrawAssetSettings()
+        {
+            DrawSection("资源包与缓存");
+            SerializedProperty packages = serializedObject.FindProperty("_assetPackages");
+            EditorGUILayout.PropertyField(packages, new GUIContent("资源包"), true);
+            var aliases = new HashSet<string>(StringComparer.Ordinal);
+            for (int i = 0; i < packages.arraySize; i++)
+            {
+                var package = packages.GetArrayElementAtIndex(i).objectReferenceValue as AssetPackageConfig;
+                string alias = package == null ? null : package.Alias?.Trim();
+                if (string.IsNullOrEmpty(alias) || alias.Contains(":") || !aliases.Add(alias))
+                {
+                    EditorGUILayout.HelpBox("每个资源包需要一个不同且不含冒号的别名。默认资源包的别名为 main。",
+                        MessageType.Error);
+                    break;
+                }
+            }
+            EditorGUILayout.PropertyField(serializedObject.FindProperty("_residentAssets"),
+                new GUIContent("启动常驻资源", "填写包别名:包内地址。首屏就绪后在后台加载。"), true);
+            EditorGUILayout.PropertyField(serializedObject.FindProperty("_startupAssetTimeout"),
+                new GUIContent("常驻加载超时（秒）"));
+            SerializedProperty overrideCache = serializedObject.FindProperty("_overrideAssetCache");
+            EditorGUILayout.PropertyField(overrideCache, new GUIContent("自定义缓存预算"));
+            if (overrideCache.boolValue)
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("_assetCache"), new GUIContent("缓存预算"), true);
         }
 
         private static void DrawSection(string title)
@@ -191,62 +219,6 @@ namespace EasyFramework.Editor.UI
 
             error = null;
             return true;
-        }
-    }
-
-    [CustomEditor(typeof(UIBindingContext))]
-    internal sealed class UIBindingContextInspector : UnityEditor.Editor
-    {
-        public override void OnInspectorGUI()
-        {
-            DrawDefaultInspector();
-            EditorGUILayout.Space();
-            var context = (UIBindingContext)target;
-            DrawBindingValidation(context);
-            if (GUILayout.Button("智能收集 bind_ 节点", GUILayout.Height(26f)))
-            {
-                List<UIBindingDefinition> collected = UIBindingAutoCollector.Collect(context);
-                List<UIBindingDefinition> merged = UIBindingAutoCollector.Merge(
-                    context,
-                    collected,
-                    out int addedCount);
-                int choice = EditorUtility.DisplayDialogComplex(
-                    "收集 UI Binding",
-                    $"扫描到 {collected.Count} 条绑定，其中 {addedCount} 条是新绑定。\n\n" +
-                    "推荐合并以保留已有手工配置；覆盖会清空现有列表后重新生成。",
-                    $"合并（新增 {addedCount}）",
-                    "取消",
-                    $"覆盖（{collected.Count}）");
-                if (choice != 1)
-                {
-                    Undo.RecordObject(context, "Collect UI bindings");
-                    context.ReplaceBindings(choice == 0 ? merged : collected);
-                    EditorUtility.SetDirty(context);
-                }
-            }
-            EditorGUILayout.HelpBox(
-                "命名规则：bind_Level 自动推断属性；bind_Level$Text 可显式指定 Text。默认合并，不再直接覆盖已有绑定。",
-                MessageType.Info);
-        }
-
-        private static void DrawBindingValidation(UIBindingContext context)
-        {
-            System.Type sourceType = UIBindingEditorReflection.ResolveSourceType(context);
-            if (sourceType == null)
-            {
-                EditorGUILayout.HelpBox("Source 为空。运行时由 UIDisplay 的纯 C# Logic 注入时可忽略。", MessageType.Info);
-                return;
-            }
-            foreach (UIBindingDefinition binding in context.Bindings)
-            {
-                if (binding == null || binding.Target == null)
-                {
-                    EditorGUILayout.HelpBox("存在空的绑定目标。", MessageType.Error);
-                    continue;
-                }
-                if (!UIBindingEditorReflection.HasBindableMember(sourceType, binding.SourceKey))
-                    EditorGUILayout.HelpBox($"找不到响应属性：{binding.SourceKey}", MessageType.Error);
-            }
         }
     }
 

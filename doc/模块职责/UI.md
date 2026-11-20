@@ -1,5 +1,7 @@
-# UI
+# UI 模块
 
-`UIService` 是业务入口；`UIManager` 管理页面栈、焦点、背景和 Prefab 租约；`UIFactory` 创建 Display；`UIDisplay` 描述页面资产；`UIView` 是纯 C# 行为；`UIBinding` 与 `UIReference` 处理组件引用；`UIStateController`、`UIElement` 保存状态；`UITransition` 与 `UITimeline` 使用 Tween 播放动画；`UISafeArea` 处理运行时安全区。编辑器工作台直接修改真实 UGUI Prefab。
+`UIView<TArgs>` 和 `UIPopup<TArgs, TResult>` 是业务入口。生成的静态方法提供带类型的打开参数和弹窗结果。`UIManager` 管理 Screen 栈、Popup 层、返回行为、遮罩和 Prefab 租约。 `UIDisplay` 保存在 Prefab 上的页面设置和 Unity 组件引用。
 
-页面关闭由 Manager 释放实例和资源租约，转场中断清理输入遮挡与 Tween；引用收集止于最近的 UIDisplay，因此复用 Item 可拥有相同局部 Key。`UIManagerTests`、`UIBindingTests`、`UIStateTests`、`UITimelineTests`、`UIAdaptationTests` 及 PlayMode 转场测试覆盖核心闭环。布局预览只计算锚点几何；LayoutGroup 实际排版需在 Game 视图验收。
+编辑器按项目设置中的关键字与组件类型映射生成强类型成员。独立子组件使用 `UINode` 挂载 `UINodeView`，父页面直接访问生成的组件属性，组件随父页面暂停、恢复和释放。View 在 `Refresh` 刷新数据，`Watch` 管理可见期订阅，`Click` 管理按钮监听。工作台提供创建、改名预览及校验，构建前检查地址和实际包收集结果。
+
+`UIStateController`、`UIElement` 保存状态，`UITransition` 和 `UITimeline` 使用 Tween 播放动画，`UISafeArea` 处理运行时安全区。详细用法见 [UI 框架使用说明](../UI框架使用说明.md)。

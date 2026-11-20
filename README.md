@@ -1,35 +1,34 @@
 # EasyFramework
 
-EasyFramework 是面向 Unity 2022.3 LTS 的轻量游戏框架，采用单包、单 Runtime 程序集结构。
+EasyFramework 是面向 Unity 2022.3 LTS 的轻量游戏框架。核心 Runtime 独立于可选的 YooAsset 适配程序集。
 
-默认提供事件、定时器、C# 对象池和 Tween；TCP、资源加载和 HybridCLR 热更能力保留在同一包内，由项目显式注册。框架关注生命周期、所有权和主线程派发，不试图替代成熟的资源、热更或协议库。
+默认提供事件、定时器、C# 对象池、Tween 和 [音频播放](doc/模块职责/Audio.md)。TCP、资源加载和 HybridCLR 热更能力保留在同一包内，由项目显式注册。框架关注生命周期、所有权和主线程派发，不试图替代成熟的资源、热更或协议库。
 
 ## 快速开始
 
-把目录放入 Unity 项目的 `Assets/`，进入 Play Mode 后即可使用：
+把目录放入 Unity 项目的 `Assets/`，在入口场景挂载 `FrameworkLauncher`。进入 Play Mode 后即可使用：
 
 ```csharp
 TimerModule.Instance.Delay(1f, () => Log.Info("hello"));
 ```
 
-自动启动会应用内置启动配置：创建持久化 UI 根节点、独立 UI Camera、Canvas 和 EventSystem。
+Launcher 默认应用内置配置，创建持久化 UI 根节点、独立 UI Camera、Canvas 和 EventSystem。
 可通过 `Assets/Create/EasyFramework/Startup Config` 创建自定义配置，并挂到场景中的
-`FrameworkLauncher`；自动创建 Launcher 时，也可以把配置保存为 `Resources/FrameworkStartupConfig.asset`。
+`FrameworkLauncher`。未赋值时，Launcher 会尝试读取 `Resources/FrameworkStartupConfig.asset`。
 
 Development Build 中会出现可拖动的 `DEBUGGER` FPS 悬浮框，点击可打开调试窗口。
 窗口提供 Console、Information、Profiler 和 Other 分组，可查看日志、异常堆栈、设备和性能信息。
 在 Startup Config 的“真机调试窗口”中选择 `Always` 可在正式包中启用，选择 `Disabled` 可关闭；
 没有 Launcher 的场景也会按 Resources 中的配置创建该窗口。日志只保留最近 500 条。
 
-按需模块通过 `ModuleRegistry.AddRegistrar` 注册：
+按需模块通过 `ModuleRegistry.AddRegistrarAsync` 注册：
 
 ```csharp
 [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
 private static void RegisterModules()
 {
-    ModuleRegistry.AddRegistrar(modules =>
+    _ = ModuleRegistry.AddRegistrarAsync(modules =>
     {
-        modules.Register<AssetModule>();
         modules.Register<NetworkModule>();
         modules.Register<HotfixModule>();
     });
@@ -43,6 +42,8 @@ Tween API 与播放语义见 [Tween 使用说明](doc/Tween使用说明.md)。
 
 UI 业务统一通过 `UIService` 打开、查找和关闭纯 C# View；Prefab 配置、Binding、页面栈与状态机由底层自动管理。详见 [UI 框架使用说明](doc/UI框架使用说明.md)。
 
+资源包可直接拖入 Startup Config。Launcher 会注册资源模块，首次请求时自动初始化对应包。资源地址支持 `package:address`，空闲缓存会自动回收。详见 [资源管理与微信小游戏接入](doc/模块职责/Asset.md)。
+
 ## 设计边界
 
 - 不使用反射扫描或大型 DI 容器注册模块。
@@ -50,9 +51,9 @@ UI 业务统一通过 `UIService` 打开、查找和关闭纯 C# View；Prefab �
 - 资源使用引用计数租约，网络回调在 Unity 主线程派发。
 - YooAsset、HybridCLR 通过可选 Loader 接入，不作为包的强依赖。
 
-## 测试
+## 演示
 
-在 Unity Test Runner 中运行 `com.wjq.easyframework.tests` EditMode 与 `com.wjq.easyframework.playmode-tests` PlayMode 测试程序集。演示场景为 `Assets/Scenes/FrameworkShowcase.unity`；模块职责及验收记录见 `doc/`。
+演示场景为 `Assets/Scenes/FrameworkShowcase.unity`。发布检查可在独立工程副本中运行，历史结果见 `doc/验收记录-1.1.1.md`。
 
 ## 当前启动架构
 

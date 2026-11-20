@@ -4,7 +4,7 @@ using System.Collections.Generic;
 namespace EasyFramework
 {
     /// <summary>同步派发类型安全事件，并隔离单个订阅者异常。</summary>
-    public class EventModule : ModuleSingleton<EventModule>
+    public class EventModule : Module<EventModule>
     {
         private interface IEventChannel
         {

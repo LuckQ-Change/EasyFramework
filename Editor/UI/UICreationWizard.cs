@@ -1,285 +1,114 @@
 using System;
-using System.Collections.Generic;
 using System.IO;
-using System.Text;
+using System.Linq;
 using EasyFramework.UI;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
+using Object = UnityEngine.Object;
 
 namespace EasyFramework.Editor.UI
 {
     internal sealed class UICreationWizard : EditorWindow
     {
-        private const string PrefabFolderPref = "EasyFramework.UI.PrefabFolder";
-        private const string NamespacePref = "EasyFramework.UI.Namespace";
-        private const string ScriptFolderPref = "EasyFramework.UI.ScriptFolder";
-        private static readonly HashSet<string> CSharpKeywords = new HashSet<string>(StringComparer.Ordinal)
-        {
-            "abstract", "as", "base", "bool", "break", "byte", "case", "catch", "char", "checked",
-            "class", "const", "continue", "decimal", "default", "delegate", "do", "double", "else",
-            "enum", "event", "explicit", "extern", "false", "finally", "fixed", "float", "for",
-            "foreach", "goto", "if", "implicit", "in", "int", "interface", "internal", "is", "lock",
-            "long", "namespace", "new", "null", "object", "operator", "out", "override", "params",
-            "private", "protected", "public", "readonly", "ref", "return", "sbyte", "sealed", "short",
-            "sizeof", "stackalloc", "static", "string", "struct", "switch", "this", "throw", "true",
-            "try", "typeof", "uint", "ulong", "unchecked", "unsafe", "ushort", "using", "virtual",
-            "void", "volatile", "while"
-        };
-
-        private string _displayName = "InventoryView";
-        private bool _managedAsView = true;
-        private string _prefabFolder = "Assets/GameRes/UI";
-        private string _prefabLocation = "UI/InventoryView";
-        private string _namespaceName = UIScriptGenerator.DefaultNamespace;
-        private string _scriptFolder = UIScriptGenerator.DefaultScriptFolder;
-        private bool _customLocation;
-        private bool _showAdvanced;
+        private string _pageName = "";
+        private string _scriptFolder;
         private string _error;
+        private UIPageKind _kind;
 
         [MenuItem("Tools/EasyFramework/UI/Create Display", false, 1)]
-        private static void Open()
-        {
-            var window = GetWindow<UICreationWizard>(true, "Create UI Display");
-            window.minSize = new Vector2(460f, 310f);
-        }
+        private static void Open() => GetWindow<UICreationWizard>(true, "创建 UI");
 
-        internal static void OpenItemTemplate()
-        {
-            var window = GetWindow<UICreationWizard>(true, "Create UI Item");
-            window._displayName = "NewItem";
-            window._managedAsView = false;
-            window.minSize = new Vector2(460f, 310f);
-            window.Show();
-        }
+        internal static void OpenItemTemplate() => GetWindow<UICreationWizard>(true, "创建 UI")._kind = UIPageKind.Item;
 
-        private void OnEnable()
-        {
-            _prefabFolder = EditorPrefs.GetString(PrefabFolderPref, _prefabFolder);
-            _namespaceName = EditorPrefs.GetString(NamespacePref, _namespaceName);
-            _scriptFolder = EditorPrefs.GetString(ScriptFolderPref, _scriptFolder);
-            if (!_customLocation) _prefabLocation = BuildDefaultLocation(_displayName);
-        }
+        private void OnEnable() => _scriptFolder = UIAuthoringSettings.instance.ScriptFolder;
 
         private void OnGUI()
         {
-            EditorGUILayout.Space(8f);
-            EditorGUILayout.LabelField("创建 UI", new GUIStyle(EditorStyles.boldLabel) { fontSize = 16 });
-            EditorGUILayout.LabelField(
-                "默认只需要填写界面名称，其余配置会自动推导并记住。",
-                EditorStyles.wordWrappedMiniLabel);
-            EditorGUILayout.Space(8f);
-
-            EditorGUI.BeginChangeCheck();
-            string nextName = EditorGUILayout.TextField(new GUIContent("界面名称", "同时作为 Prefab 和 View 类名"), _displayName);
-            if (EditorGUI.EndChangeCheck())
-            {
-                bool followedDefault = !_customLocation ||
-                    string.Equals(_prefabLocation, BuildDefaultLocation(_displayName), StringComparison.Ordinal);
-                _displayName = nextName;
-                if (followedDefault) _prefabLocation = BuildDefaultLocation(_displayName);
-            }
-
-            _managedAsView = EditorGUILayout.Popup(
-                new GUIContent("创建类型", "页面进入 UI 栈；嵌套组件由所属页面管理。"),
-                _managedAsView ? 0 : 1,
-                new[] { "页面（推荐）", "嵌套组件 Item" }) == 0;
-
-            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
-            {
-                EditorGUILayout.LabelField("将创建", EditorStyles.boldLabel);
-                EditorGUILayout.LabelField("Prefab", GetPrefabPath());
-                EditorGUILayout.LabelField(_managedAsView ? "页面脚本" : "Item 脚本", GetScriptPath());
-                EditorGUILayout.LabelField("资源地址", _managedAsView ? EffectiveLocation : "（Item 不需要）");
-            }
-
-            _showAdvanced = EditorGUILayout.Foldout(_showAdvanced, "高级设置", true);
-            if (_showAdvanced) DrawAdvancedSettings();
-
-            _error = ValidateInput();
-            if (!string.IsNullOrEmpty(_error))
-                EditorGUILayout.HelpBox(_error, MessageType.Error);
-
-            GUILayout.FlexibleSpace();
-            using (new EditorGUI.DisabledScope(!string.IsNullOrEmpty(_error)))
-            {
-                if (GUILayout.Button("创建 Prefab 和 View", GUILayout.Height(32f))) Create();
-            }
-            EditorGUILayout.Space(8f);
-        }
-
-        private string EffectiveLocation => _customLocation
-            ? (_prefabLocation ?? string.Empty).Trim()
-            : BuildDefaultLocation(_displayName);
-
-        private void DrawAdvancedSettings()
-        {
-            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
-            {
-                DrawFolderField("Prefab 目录", ref _prefabFolder);
-                DrawFolderField("脚本目录", ref _scriptFolder);
-                _namespaceName = EditorGUILayout.TextField("命名空间", _namespaceName);
-
-                using (new EditorGUI.DisabledScope(!_managedAsView))
-                {
-                    _customLocation = EditorGUILayout.Toggle("自定义资源地址", _customLocation);
-                    using (new EditorGUI.DisabledScope(!_customLocation))
-                        _prefabLocation = EditorGUILayout.TextField("资源地址", EffectiveLocation);
-                }
-            }
-        }
-
-        private static void DrawFolderField(string label, ref string value)
-        {
-            EditorGUILayout.BeginHorizontal();
-            value = EditorGUILayout.TextField(label, value);
-            if (GUILayout.Button("选择…", GUILayout.Width(64f)))
-            {
-                string absolute = EditorUtility.OpenFolderPanel(label, Application.dataPath, string.Empty);
-                if (!string.IsNullOrWhiteSpace(absolute))
-                {
-                    string relative = FileUtil.GetProjectRelativePath(absolute);
-                    if (string.IsNullOrWhiteSpace(relative))
-                        EditorUtility.DisplayDialog("UI", "目录必须位于当前 Unity 项目的 Assets 下。", "确定");
-                    else
-                        value = relative.TrimEnd('/', '\\');
-                }
-            }
-            EditorGUILayout.EndHorizontal();
-        }
-
-        private string ValidateInput()
-        {
-            if (string.IsNullOrWhiteSpace(_displayName)) return "请输入界面名称。";
-            if (!IsIdentifier(_displayName.Trim()))
-                return "界面名称必须是合法的 C# 类型名，只能包含字母、数字和下划线，且不能以数字开头。";
-            if (!IsAssetFolder(_prefabFolder)) return "Prefab 目录必须位于 Assets 下。";
-            if (!IsAssetFolder(_scriptFolder)) return "脚本目录必须位于 Assets 下。";
-            if (!IsValidNamespace(_namespaceName)) return "命名空间格式无效，请使用以点分隔的 C# 标识符。";
-            if (_managedAsView && string.IsNullOrWhiteSpace(EffectiveLocation)) return "受管理 View 必须有资源地址。";
-            if (AssetDatabase.LoadAssetAtPath<GameObject>(GetPrefabPath()) != null)
-                return $"Prefab 已存在：{GetPrefabPath()}";
-            return null;
-        }
-
-        private void Create()
-        {
-            string prefabPath = GetPrefabPath();
-            bool completed = false;
+            _pageName = EditorGUILayout.TextField("名称", _pageName);
+            _kind = (UIPageKind)EditorGUILayout.EnumPopup("类型", _kind);
+            _scriptFolder = EditorGUILayout.TextField("业务脚本目录", _scriptFolder);
+            if (!string.IsNullOrEmpty(_error)) EditorGUILayout.HelpBox(_error, MessageType.Error);
+            if (GUILayout.Button("项目预设")) SettingsService.OpenProjectSettings(UIAuthoringSettings.SettingsPath);
+            if (!GUILayout.Button("创建")) return;
             try
             {
-                GameObject prefab = CreateAssets(
-                    prefabPath,
-                    _displayName.Trim(),
-                    _namespaceName,
-                    _managedAsView ? EffectiveLocation : string.Empty,
-                    _scriptFolder,
-                    _managedAsView);
-
-                EditorPrefs.SetString(PrefabFolderPref, _prefabFolder);
-                EditorPrefs.SetString(NamespacePref, _namespaceName);
-                EditorPrefs.SetString(ScriptFolderPref, _scriptFolder);
-                Selection.activeObject = prefab;
-                EditorGUIUtility.PingObject(prefab);
+                string path = Create(_pageName.Trim(), _kind, _scriptFolder);
+                EditorApplication.delayCall += () => PrefabStageUtility.OpenPrefab(path);
                 Close();
-                completed = true;
             }
-            catch (Exception exception)
-            {
-                Debug.LogException(exception);
-                EditorUtility.DisplayDialog("UI 创建失败", exception.Message, "确定");
-            }
-            if (completed && !Application.isBatchMode)
-            {
-                try
-                {
-                    PrefabStageUtility.OpenPrefab(prefabPath);
-                }
-                catch (Exception exception)
-                {
-                    Debug.LogException(exception);
-                    EditorUtility.DisplayDialog("UI", "页面已创建，但未能自动打开 Prefab。可在 Project 中双击它继续编辑。", "确定");
-                }
-            }
+            catch (Exception exception) { _error = exception.Message; }
         }
 
-        internal static GameObject CreateAssets(string prefabPath, string displayName,
-            string namespaceName, string prefabLocation, string scriptFolder, bool managedAsView)
+        internal static string Create(string name, UIPageKind kind, string businessFolder = null)
         {
+            UIAuthoringSettings settings = UIAuthoringSettings.instance;
+            string prefabFolder = UIGeneratedScriptFiles.AssetFolder(settings.PrefabFolder);
+            string scriptFolder = UIGeneratedScriptFiles.AssetFolder(businessFolder ?? settings.ScriptFolder);
+            if (!UIReferenceCodeGenerator.IsName(name) ||
+                !settings.Namespace.Split('.').All(UIReferenceCodeGenerator.IsIdentifier))
+                throw new InvalidOperationException("界面名称应以大写字母开头，命名空间必须是有效的 C# 标识符。");
+
+            bool isPage = UIBindingRoot.IsPageKind(kind);
+            string address = isPage ? LocationFor(name) : string.Empty;
+            string prefab = $"{prefabFolder}/{name}.prefab";
+            string script = $"{scriptFolder}/{name}.cs";
+            if (File.Exists(prefab) || File.Exists(script))
+                throw new InvalidOperationException("同名 Prefab 或脚本已存在。");
+
             GameObject root = null;
-            bool createdPrefab = false;
+            string generated = null;
+            bool wroteGenerated = false;
             try
             {
-                Directory.CreateDirectory(Path.GetFullPath(Path.GetDirectoryName(prefabPath)));
-                AssetDatabase.Refresh();
-                root = new GameObject(displayName, typeof(RectTransform), typeof(UIDisplay));
-                ((RectTransform)root.transform).sizeDelta = new Vector2(800f, 600f);
-                var serialized = new SerializedObject(root.GetComponent<UIDisplay>());
-                serialized.FindProperty("_managedAsView").boolValue = managedAsView;
-                serialized.ApplyModifiedPropertiesWithoutUndo();
+                UIGeneratedScriptFiles.EnsureFolder(prefabFolder);
+                UIGeneratedScriptFiles.EnsureFolder(scriptFolder);
+                File.WriteAllText(script, UIScriptGenerator.Create(name, settings.Namespace, kind));
+                AssetDatabase.ImportAsset(script, ImportAssetOptions.ForceSynchronousImport);
+                string guid = AssetDatabase.AssetPathToGUID(script);
+                if (string.IsNullOrEmpty(guid)) throw new InvalidOperationException("界面脚本未成功导入。");
+                generated = UIGeneratedScriptFiles.PathFor(script, guid, prepare: true);
+                if (File.Exists(generated)) throw new InvalidOperationException($"生成脚本已存在：{generated}。");
+                wroteGenerated = true;
+                File.WriteAllText(generated, UIReferenceCodeGenerator.Source(settings.Namespace + "." + name, kind,
+                    address, isPage ? settings.Namespace + "." + name + "Args" : null,
+                    kind == UIPageKind.Popup ? settings.Namespace + "." + name + "Result" : null, Array.Empty<UIControlReference>()));
+                AssetDatabase.ImportAsset(generated);
 
-                GameObject prefab = PrefabUtility.SaveAsPrefabAsset(root, prefabPath);
-                if (prefab == null) throw new InvalidOperationException("Unity 未能创建 Prefab，请检查目标目录。");
-                createdPrefab = true;
-                UIScriptGenerator.Generate(prefab.GetComponent<UIDisplay>(),
-                    displayName, namespaceName, prefabLocation, scriptFolder);
+                root = new GameObject(name, typeof(RectTransform), kind == UIPageKind.Node ? typeof(UINode) : typeof(UIDisplay));
+                var rect = (RectTransform)root.transform;
+                if (isPage)
+                {
+                    rect.anchorMin = Vector2.zero;
+                    rect.anchorMax = Vector2.one;
+                    rect.offsetMin = rect.offsetMax = Vector2.zero;
+                    root.AddComponent<UITransition>();
+                }
+                string viewName = settings.Namespace + "." + name;
+                if (root.TryGetComponent(out UINode node)) node.SetViewScript(viewName, guid);
+                else root.GetComponent<UIDisplay>().Configure(kind, viewName, guid, address);
+                if (PrefabUtility.SaveAsPrefabAsset(root, prefab) == null)
+                    throw new InvalidOperationException("Prefab 保存失败。");
                 return prefab;
             }
             catch
             {
-                if (createdPrefab) AssetDatabase.DeleteAsset(prefabPath);
+                foreach (string path in new[] { prefab, script, wroteGenerated ? generated : null })
+                    if (File.Exists(path) && !AssetDatabase.DeleteAsset(path)) File.Delete(path);
                 throw;
             }
-            finally
-            {
-                if (root != null) DestroyImmediate(root);
-            }
+            finally { if (root != null) Object.DestroyImmediate(root); }
         }
 
-        private string GetPrefabPath() =>
-            NormalizeFolder(_prefabFolder) + "/" + (_displayName ?? string.Empty).Trim() + ".prefab";
-
-        private string GetScriptPath() =>
-            NormalizeFolder(_scriptFolder) + "/" + MakeTypeName(_displayName) + ".cs";
-
-        private static string BuildDefaultLocation(string displayName) =>
-            "UI/" + MakeTypeName(displayName);
-
-        private static string NormalizeFolder(string path) =>
-            (path ?? string.Empty).Trim().Replace('\\', '/').TrimEnd('/');
-
-        private static bool IsAssetFolder(string path)
+        internal static string LocationFor(string name)
         {
-            string normalized = NormalizeFolder(path);
-            return normalized == "Assets" || normalized.StartsWith("Assets/", StringComparison.Ordinal);
+            var settings = UIAuthoringSettings.instance;
+            string package = settings.Package?.Trim();
+            string prefix = settings.AddressPrefix?.Trim().Trim('/') ?? string.Empty;
+            if (string.IsNullOrEmpty(package) || package.Contains(":") || prefix.Contains(":"))
+                throw new InvalidOperationException("请先配置可用的 UI 资源包别名和包内路径。");
+            return package + ":" + (prefix.Length == 0 ? name : prefix + "/" + name);
         }
 
-        private static string MakeTypeName(string value)
-        {
-            if (string.IsNullOrWhiteSpace(value)) return string.Empty;
-            var builder = new StringBuilder();
-            foreach (char character in value.Trim())
-                builder.Append(char.IsLetterOrDigit(character) || character == '_' ? character : '_');
-            if (builder.Length > 0 && char.IsDigit(builder[0])) builder.Insert(0, '_');
-            return builder.ToString();
-        }
-
-        private static bool IsValidNamespace(string value)
-        {
-            if (string.IsNullOrWhiteSpace(value)) return false;
-            string[] parts = value.Trim().Split('.');
-            for (int i = 0; i < parts.Length; i++)
-                if (!IsIdentifier(parts[i])) return false;
-            return true;
-        }
-
-        private static bool IsIdentifier(string value)
-        {
-            if (string.IsNullOrEmpty(value) || CSharpKeywords.Contains(value)) return false;
-            if (!(char.IsLetter(value[0]) || value[0] == '_')) return false;
-            for (int i = 1; i < value.Length; i++)
-                if (!(char.IsLetterOrDigit(value[i]) || value[i] == '_')) return false;
-            return true;
-        }
     }
 }

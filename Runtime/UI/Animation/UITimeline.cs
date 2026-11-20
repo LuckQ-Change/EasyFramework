@@ -2,115 +2,117 @@ using System;
 using System.Collections.Generic;
 using EasyFramework.Tweening;
 using UnityEngine;
-using UnityEngine.UI;
 
 namespace EasyFramework.UI
 {
-    /// <summary>标识时间轴片段作用的 UI 属性。</summary>
-    public enum UITimelineProperty { Color, AnchoredPosition, Scale, Alpha }
+    public enum UITimelineProperty { Color, AnchoredPosition, Scale, Alpha, Rotation, FillAmount }
 
-    /// <summary>时间轴上的一个属性片段；起点与终点值显式保存以支持任意位置 Seek。</summary>
     [Serializable]
     public sealed class UITimelineClip
     {
         [SerializeField] private Component _target;
-        [SerializeField] private UITimelineProperty _property;
+        [SerializeField] private UITimelineProperty _property = UITimelineProperty.AnchoredPosition;
         [SerializeField, Min(0f)] private float _start;
         [SerializeField, Min(0f)] private float _duration = 0.3f;
-        [SerializeField] private TweenEase _ease = TweenEase.Linear;
-        [SerializeField] private Color _fromColor = Color.white;
-        [SerializeField] private Color _toColor = Color.white;
-        [SerializeField] private Vector2 _fromPosition;
-        [SerializeField] private Vector2 _toPosition;
-        [SerializeField] private Vector3 _fromScale = Vector3.one;
-        [SerializeField] private Vector3 _toScale = Vector3.one;
-        [SerializeField, Range(0f, 1f)] private float _fromAlpha = 1f;
-        [SerializeField, Range(0f, 1f)] private float _toAlpha = 1f;
+        [SerializeField] private TweenEase _ease;
+        [SerializeField] private Vector4 _from;
+        [SerializeField] private Vector4 _to;
 
-        public Component Target => _target;
-        public UITimelineProperty Property => _property;
-        public float Start => _start;
-        public float Duration => _duration;
-        public TweenEase Ease => _ease;
-
-        /// <summary>创建运行时和编辑器共用的属性 Tween；无效目标在此处给出定位错误。</summary>
-        public TweenHandle CreateTween()
-        {
-            if (_target == null) throw new InvalidOperationException("UI 时间轴片段缺少目标组件。");
-            TweenHandle tween;
-            switch (_property)
-            {
-                case UITimelineProperty.Color when _target is Graphic graphic:
-                    tween = TweenFactory.To(_fromColor, _toColor, _duration, value => graphic.color = value);
-                    break;
-                case UITimelineProperty.AnchoredPosition when _target is RectTransform rect:
-                    tween = TweenFactory.To(_fromPosition, _toPosition, _duration,
-                        value => rect.anchoredPosition = value);
-                    break;
-                case UITimelineProperty.Scale when _target is RectTransform scaleRect:
-                    tween = TweenFactory.To(_fromScale, _toScale, _duration,
-                        value => scaleRect.localScale = value);
-                    break;
-                case UITimelineProperty.Alpha when _target is CanvasGroup group:
-                    tween = TweenFactory.To(_fromAlpha, _toAlpha, _duration, value => group.alpha = value);
-                    break;
-                default:
-                    throw new InvalidOperationException(
-                        $"UI 时间轴目标“{_target.name}”不支持 {_property} 属性。");
-            }
-            return tween.SetEase(_ease);
-        }
+        internal UITimelineBinding Binding => new(_target, _property);
+        internal UITimelineSpan Span => new(_start, _start + _duration, _from, _to, _ease);
+        internal float Duration => _duration;
     }
 
-    /// <summary>按时间片段编排 UI 属性动画，编辑器 Seek 和运行时播放使用同一 TweenSequence。</summary>
+    [Serializable]
+    public sealed class UITimelineKeyframe
+    {
+        [SerializeField, Min(0f)] private float _time;
+        [SerializeField] private Vector4 _value;
+        [SerializeField] private TweenEase _ease;
+
+        internal float Time => _time;
+        internal Vector4 Value => _value;
+        internal TweenEase Ease => _ease;
+    }
+
+    [Serializable]
+    public sealed class UITimelineKeyframeTrack
+    {
+        [SerializeField] private Component _target;
+        [SerializeField] private UITimelineProperty _property = UITimelineProperty.AnchoredPosition;
+        [SerializeField] private List<UITimelineKeyframe> _keys = new();
+
+        internal UITimelineBinding Binding => new(_target, _property);
+        internal IReadOnlyList<UITimelineKeyframe> Keys => _keys;
+    }
+
+    [Serializable]
+    public sealed class UITimelineAnimation
+    {
+        [SerializeField] private string _name = "Animation";
+        [SerializeField] private List<UITimelineClip> _clips = new();
+        [SerializeField] private List<UITimelineKeyframeTrack> _tracks = new();
+
+        public string Name => _name;
+        internal IReadOnlyList<UITimelineClip> Clips => _clips;
+        internal IReadOnlyList<UITimelineKeyframeTrack> Tracks => _tracks;
+    }
+
     [AddComponentMenu("EasyFramework/UI/UI Timeline")]
     [DisallowMultipleComponent]
     public sealed class UITimeline : MonoBehaviour
     {
-        [SerializeField] private List<UITimelineClip> _clips = new List<UITimelineClip>();
+        [SerializeField] private List<UITimelineAnimation> _animations = new();
         [SerializeField] private TweenTimeMode _timeMode = TweenTimeMode.Unscaled;
-        private TweenSequence _active;
+        private UITimelinePlayback _active;
 
-        public IReadOnlyList<UITimelineClip> Clips => _clips;
-        public float Duration
-        {
-            get
-            {
-                float end = 0f;
-                foreach (UITimelineClip clip in _clips)
-                    if (clip != null) end = Mathf.Max(end, clip.Start + clip.Duration);
-                return end;
-            }
-        }
+        public IReadOnlyList<UITimelineAnimation> Animations => _animations;
 
-        /// <summary>构建一条独立 Sequence；调用方拥有它并负责播放、Seek 或 Kill。</summary>
-        public TweenSequence BuildSequence()
+        public TweenHandle Play(string animation)
         {
-            TweenSequence sequence = TweenFactory.Sequence();
-            foreach (UITimelineClip clip in _clips)
-            {
-                if (clip == null) continue;
-                sequence.Insert(clip.Start, clip.CreateTween());
-            }
-            return sequence;
-        }
-
-        /// <summary>从起点播放，重复调用会先中断旧动画。</summary>
-        public void Play()
-        {
+            UITimelinePlayback playback = CreatePlayback(animation);
             Stop();
-            _active = BuildSequence();
-            _active.SetOwner(this).SetTimeMode(_timeMode).Play();
+            _active = playback;
+            return playback.Play();
         }
 
-        /// <summary>停止动画，不触发完成回调，也不强制写入终值。</summary>
         public void Stop()
         {
             _active?.Kill();
             _active = null;
         }
 
+        internal bool Contains(string animation) =>
+            _animations.Exists(item => item != null && string.Equals(item.Name, animation, StringComparison.Ordinal));
+
+        internal UITimelinePlayback CreatePlayback(string animation)
+        {
+            var data = _animations.Find(item => item != null && string.Equals(item.Name, animation, StringComparison.Ordinal));
+            if (data == null) throw new InvalidOperationException($"UI 时间轴“{name}”找不到动画“{animation}”。");
+            return CreatePlayback(data);
+        }
+
+        internal UITimelinePlayback CreatePlayback(UITimelineAnimation animation)
+        {
+            if (animation == null || string.IsNullOrWhiteSpace(animation.Name))
+                throw new InvalidOperationException("UI 时间轴动画需要名称。");
+            UIBindingRoot root = GetComponentInParent<UIBindingRoot>(true);
+            var playback = UITimelinePlayback.Build(animation, root != null ? root.transform : transform);
+            playback.SetOwner(this).SetTimeMode(_timeMode);
+            return playback;
+        }
+
+        internal void ValidateConfiguration()
+        {
+            var names = new HashSet<string>(StringComparer.Ordinal);
+            foreach (UITimelineAnimation animation in _animations)
+            {
+                if (animation == null || !names.Add(animation.Name))
+                    throw new InvalidOperationException($"UI 时间轴“{name}”存在无效或重复的动画名称。");
+                CreatePlayback(animation);
+            }
+        }
+
         private void OnDisable() => Stop();
-        private void OnDestroy() => Stop();
     }
 }

@@ -3,7 +3,6 @@
     "rootNamespace": "",
     "references": [
         "Unity.ugui",
-        "YooAsset",
         "HybridCLR.Runtime"
     ],
     "includePlatforms": [],
@@ -14,11 +13,6 @@
     "autoReferenced": true,
     "defineConstraints": [],
     "versionDefines": [
-        {
-            "name": "com.tuyoogame.yooasset",
-            "expression": "[3.0.0,4.0.0)",
-            "define": "EASY_YOOASSET"
-        },
         {
             "name": "com.code-philosophy.hybridclr",
             "expression": "1.0.0",
