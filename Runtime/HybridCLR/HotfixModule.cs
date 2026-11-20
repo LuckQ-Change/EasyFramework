@@ -5,7 +5,7 @@ using System.Reflection;
 namespace EasyFramework
 {
     /// <summary>组织程序集加载和入口调用；只记录成功加载的程序集。</summary>
-    public class HotfixModule : ModuleSingleton<HotfixModule>
+    public class HotfixModule : Module<HotfixModule>
     {
         private IHotfixLoader _loader;
         private readonly List<Assembly> _loaded = new List<Assembly>();

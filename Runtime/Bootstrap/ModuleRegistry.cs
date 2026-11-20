@@ -1,60 +1,51 @@
 using System;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 using EasyFramework.Tweening;
+using UnityEngine;
 
 namespace EasyFramework
 {
-    /// <summary>注册默认模块及业务扩展；晚到注册作为完整批次安装。</summary>
+    /// <summary>登记项目模块。启动完成后，新注册器立即作为独立批次安装。</summary>
     public static class ModuleRegistry
     {
-        private static readonly List<Action<ModuleManager>> _extraRegistrars = new List<Action<ModuleManager>>();
+        private static readonly List<Action<ModuleManager>> Registrars = new();
 
-        public static void AddRegistrar(Action<ModuleManager> registrar)
+        public static async Task<bool> AddRegistrarAsync(Action<ModuleManager> registrar)
         {
-            if (registrar == null) return;
-            if (_extraRegistrars.Contains(registrar)) return;
-            _extraRegistrars.Add(registrar);
-
-            if (Entry.IsRunning)
+            if (registrar == null) throw new ArgumentNullException(nameof(registrar));
+            if (Registrars.Contains(registrar)) return false;
+            Registrars.Add(registrar);
+            try
             {
-                try
-                {
-                    Entry.Install(registrar);
-                }
-                catch
-                {
-                    _extraRegistrars.Remove(registrar);
-                    throw;
-                }
+                if (ModuleManager.Current is ModuleManager modules)
+                    await modules.InstallAsync(registrar);
+                return true;
+            }
+            catch
+            {
+                Registrars.Remove(registrar);
+                throw;
             }
         }
 
-        public static void ClearRegistrars()
-        {
-            _extraRegistrars.Clear();
-        }
+        public static void RemoveRegistrar(Action<ModuleManager> registrar) => Registrars.Remove(registrar);
 
-        /// <summary>只移除指定注册器，避免演示场景关闭时清除项目的其他注册器。</summary>
-        public static bool RemoveRegistrar(Action<ModuleManager> registrar) =>
-            registrar != null && _extraRegistrars.Remove(registrar);
-
-        public static void ApplyAll(ModuleManager modules)
+        internal static void RegisterAll(ModuleManager modules)
         {
-            if (modules == null) return;
-            RegisterDefault(modules);
-            for (int i = 0; i < _extraRegistrars.Count; i++)
-            {
-                _extraRegistrars[i](modules);
-            }
-        }
-
-        public static void RegisterDefault(ModuleManager modules)
-        {
-            if (modules == null) return;
             modules.Register<EventModule>();
             modules.Register<TimerModule>();
             modules.Register<PoolModule>();
             modules.Register<TweenModule>();
+            foreach (var registrar in Registrars.ToArray()) registrar(modules);
+            modules.Register<AudioModule>();
+        }
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void Reset()
+        {
+            if (ModuleManager.Current is ModuleManager modules) _ = modules.StopAsync();
+            Registrars.Clear();
         }
     }
 }

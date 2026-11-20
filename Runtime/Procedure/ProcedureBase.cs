@@ -8,26 +8,17 @@ namespace EasyFramework
     public abstract class ProcedureBase
     {
         public ProcedureContext Context { get; private set; }
-        public ProcedureModule Module { get; private set; }
 
-        internal async Task<Type> EnterAsync(
-            ProcedureModule module,
-            ProcedureContext context,
-            CancellationToken cancellationToken)
+        internal Task<Type> EnterAsync(ProcedureContext context, CancellationToken cancellationToken)
         {
-            Module = module;
             Context = context;
-            return await OnEnterAsync(cancellationToken);
+            return OnEnterAsync(cancellationToken);
         }
 
         internal async Task ExitAsync(CancellationToken cancellationToken)
         {
             try { await OnExitAsync(cancellationToken); }
-            finally
-            {
-                Context = null;
-                Module = null;
-            }
+            finally { Context = null; }
         }
 
         internal void Update(float deltaTime) => OnUpdate(deltaTime);

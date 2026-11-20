@@ -21,12 +21,12 @@ namespace EasyFramework.Editor.UI
         private static readonly string[] PresetNames = {
             "1920 × 1080", "1366 × 768", "1080 × 1920", "1170 × 2532", "自定义" };
         private readonly List<PreviewRect> _rects = new List<PreviewRect>();
-        private UIDisplay _display;
+        private UIBindingRoot _display;
         private int _preset;
         private Vector2Int _resolution = new Vector2Int(1920, 1080);
         private Vector4 _safeInsets;
 
-        internal static void Open(UIDisplay display)
+        internal static void Open(UIBindingRoot display)
         {
             var window = GetWindow<UIResolutionPreview>("UI 适配预览");
             window.minSize = new Vector2(480f, 420f);
@@ -36,7 +36,7 @@ namespace EasyFramework.Editor.UI
 
         private void OnGUI()
         {
-            _display = (UIDisplay)EditorGUILayout.ObjectField("页面", _display, typeof(UIDisplay), true);
+            _display = (UIBindingRoot)EditorGUILayout.ObjectField("页面", _display, typeof(UIBindingRoot), true);
             if (_display == null) return;
             int nextPreset = EditorGUILayout.Popup("分辨率", _preset, PresetNames);
             if (nextPreset != _preset)
@@ -75,7 +75,7 @@ namespace EasyFramework.Editor.UI
                 if (item.Depth == 0) continue;
                 Rect rect = ToScreen(item.Rect, screen, scale);
                 if (!rect.Overlaps(screen)) continue;
-                Color color = item.Transform.GetComponent<UIDisplay>() != null
+                Color color = item.Transform.GetComponent<UIBindingRoot>() != null
                     ? new Color(0.21f, 0.82f, 0.65f, 0.75f)
                     : new Color(0.29f, 0.62f, 1f, 0.45f);
                 DrawOutline(rect, color);

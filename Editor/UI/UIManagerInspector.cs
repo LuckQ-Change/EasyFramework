@@ -22,6 +22,7 @@ namespace EasyFramework.Editor.UI
         public override void OnInspectorGUI()
         {
             DrawDefaultInspector();
+            if (!Application.isPlaying) return;
             var host = (UIRuntimeHost)target;
             var manager = host.Manager;
             if (manager == null)
@@ -42,19 +43,15 @@ namespace EasyFramework.Editor.UI
                     root == null ? "缺失" : $"排序值 {(int)layer} · {root.childCount} 个界面");
             }
 
-            if (!Application.isPlaying) return;
             EditorGUILayout.Space();
             EditorGUILayout.LabelField($"已打开界面（{manager.OpenCount}）", EditorStyles.boldLabel);
-            for (int i = manager.OpenDisplays.Count - 1; i >= 0; i--)
+            foreach (UIPageResourceUsage page in manager.GetResourceSnapshot())
             {
-                UIDisplay display = manager.OpenDisplays[i];
-                if (display != null)
-                    EditorGUILayout.ObjectField(display.CurrentLayer.ToString(), display, typeof(UIDisplay), true);
+                string state = page.Visible ? "显示" : "隐藏";
+                EditorGUILayout.LabelField(page.ViewType.Name,
+                    $"{state} · {page.Leases} 份租约 · 估算 {EditorUtility.FormatBytes(page.EstimatedBytes)}");
             }
-            EditorGUILayout.BeginHorizontal();
-            if (GUILayout.Button("返回 / 关闭顶层")) manager.Back();
-            if (GUILayout.Button("关闭全部")) manager.CloseAll();
-            EditorGUILayout.EndHorizontal();
+            if (GUILayout.Button("返回 / 关闭顶层")) _ = manager.BackAsync();
         }
     }
 }

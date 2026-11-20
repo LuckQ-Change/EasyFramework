@@ -5,7 +5,7 @@ using System.Threading.Tasks;
 namespace EasyFramework
 {
     /// <summary>限制网络事件队列并在主线程派发当前连接的事件。</summary>
-    public class NetworkModule : ModuleSingleton<NetworkModule>
+    public class NetworkModule : Module<NetworkModule>, IFrameUpdate
     {
         private readonly TcpNetClient _client = new TcpNetClient();
         private int _maxEventsPerUpdate = 256;
@@ -58,7 +58,7 @@ namespace EasyFramework
             _client.Disconnect();
         }
 
-        protected override void OnUpdate(float deltaTime)
+        void IFrameUpdate.Tick(float deltaTime)
         {
             int budget = MaxEventsPerUpdate;
             int processed = 0;

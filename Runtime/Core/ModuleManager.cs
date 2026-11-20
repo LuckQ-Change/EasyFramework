@@ -1,206 +1,177 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace EasyFramework
 {
-    /// <summary>按注册顺序更新模块，并在失败或关闭时逆序回滚。</summary>
-    public class ModuleManager
+    /// <summary>批量注册模块，管理初始化、逐帧更新以及关闭。</summary>
+    public sealed class ModuleManager
     {
-        private readonly Dictionary<Type, IModule> _modules = new Dictionary<Type, IModule>();
-        private readonly List<IModule> _updateList = new List<IModule>();
+        private readonly Dictionary<Type, Module> _modules = new();
+        private readonly List<(Module Module, int Order)> _registered = new();
+        private readonly List<Module> _initialized = new();
+        private readonly List<IFrameUpdate> _updates = new();
+        private readonly SemaphoreSlim _batchGate = new(1);
+        private readonly CancellationTokenSource _shutdown = new();
+        private TaskCompletionSource<bool> _stop;
+        private bool _used;
+        private bool _registering;
+        private bool _ticking;
 
-        public ModuleManagerState State { get; private set; } = ModuleManagerState.Registering;
-        public int Count => _updateList.Count;
+        public static ModuleManager Current { get; private set; }
+        public bool IsRunning { get; private set; }
+        public int Count => _registered.Count;
 
-        public T Register<T>() where T : class, IModule, new()
+        public Task StartAsync(Action<ModuleManager> configure)
         {
-            if (State != ModuleManagerState.Registering && State != ModuleManagerState.Installing)
-            {
-                throw new InvalidOperationException(
-                    $"Cannot register {typeof(T).Name} while ModuleManager is {State}.");
-            }
+            if (configure == null) throw new ArgumentNullException(nameof(configure));
+            if (Current != null || _used)
+                throw new InvalidOperationException("A module manager is already active or this instance has been stopped.");
 
-            var type = typeof(T);
-            if (_modules.TryGetValue(type, out var exist))
-            {
-                return (T)exist;
-            }
+            _used = true;
+            Current = this;
+            return AddBatchAsync(configure, startup: true);
+        }
+
+        /// <summary>阶段从小到大初始化。同阶段的异步初始化可以重叠。</summary>
+        public T Register<T>(int order = 0) where T : Module, new()
+        {
+            if (!_registering || _stop != null)
+                throw new InvalidOperationException("Register modules in a registrar or an installation batch.");
+            if (Get<T>() is T existing) return existing;
 
             var module = new T();
+            _modules.Add(typeof(T), module);
+            _registered.Add((module, order));
+            return module;
+        }
+
+        public T Get<T>() where T : Module =>
+            _modules.TryGetValue(typeof(T), out Module module) ? (T)module : null;
+
+        public Task InstallAsync(Action<ModuleManager> configure)
+        {
+            if (configure == null) throw new ArgumentNullException(nameof(configure));
+            if (Current != this || _stop != null)
+                throw new InvalidOperationException("Module installation requires an active manager.");
+            return AddBatchAsync(configure, startup: false);
+        }
+
+        public void Tick(float deltaTime)
+        {
+            if (!IsRunning || _ticking) return;
+            _ticking = true;
             try
             {
-                (module as ModuleSingletonBase)?.RegisterInstance();
-                _modules.Add(type, module);
-                _updateList.Add(module);
-                return module;
-            }
-            catch
-            {
-                (module as ModuleSingletonBase)?.UnregisterInstance();
-                throw;
-            }
-        }
-
-        public T Get<T>() where T : class, IModule
-        {
-            return _modules.TryGetValue(typeof(T), out var module) ? module as T : null;
-        }
-
-        public void InitAll()
-        {
-            if (State != ModuleManagerState.Registering)
-            {
-                throw new InvalidOperationException($"Cannot initialize ModuleManager while it is {State}.");
-            }
-
-            State = ModuleManagerState.Initializing;
-            for (int i = 0; i < _updateList.Count; i++)
-            {
-                try
+                int count = _updates.Count;
+                for (int i = 0; i < count && IsRunning; i++)
                 {
-                    _updateList[i].OnInit();
-                }
-                catch (Exception ex)
-                {
-                    string moduleName = _updateList[i].GetType().Name;
-                    RollbackInitialization(i);
-                    State = ModuleManagerState.Faulted;
-                    throw new InvalidOperationException(
-                        $"Module {moduleName} initialization failed at index {i}.", ex);
+                    IFrameUpdate update = _updates[i];
+                    try { update.Tick(deltaTime); }
+                    catch (Exception exception) { Log.Error($"[Modules] {update.GetType().Name}.Tick failed.", exception); }
                 }
             }
-            State = ModuleManagerState.Running;
+            finally { _ticking = false; }
         }
 
-        public void Install(Action<ModuleManager> installer)
+        public Task StopAsync()
         {
-            if (installer == null) return;
+            if (_stop != null) return _stop.Task;
+            if (Current != this) return Task.CompletedTask;
 
-            if (State == ModuleManagerState.Registering)
-            {
-                installer(this);
-                return;
-            }
-            if (State != ModuleManagerState.Running)
-            {
-                throw new InvalidOperationException($"Cannot install modules while ModuleManager is {State}.");
-            }
+            _stop = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            IsRunning = false;
+            Cancel(_shutdown);
+            _ = FinishStopAsync();
+            return _stop.Task;
+        }
 
-            int startIndex = _updateList.Count;
-            State = ModuleManagerState.Installing;
+        private async Task FinishStopAsync()
+        {
+            await _batchGate.WaitAsync();
             try
             {
-                installer(this);
-                State = ModuleManagerState.Initializing;
-                for (int i = startIndex; i < _updateList.Count; i++)
-                {
-                    try
-                    {
-                        _updateList[i].OnInit();
-                    }
-                    catch
-                    {
-                        RollbackInstalledModules(startIndex, i);
-                        throw;
-                    }
-                }
-                State = ModuleManagerState.Running;
-            }
-            catch
-            {
-                if (_updateList.Count > startIndex)
-                {
-                    RemoveRegisteredRange(startIndex);
-                }
-                State = ModuleManagerState.Running;
-                throw;
-            }
-        }
-
-        public void Update(float deltaTime)
-        {
-            if (State != ModuleManagerState.Running) return;
-            for (int i = 0; i < _updateList.Count; i++)
-            {
-                try
-                {
-                    _updateList[i].OnUpdate(deltaTime);
-                }
-                catch (Exception ex)
-                {
-                    TryLogError($"[ModuleManager] {_updateList[i].GetType().Name}.OnUpdate failed: {ex}");
-                }
-            }
-        }
-
-        public void ShutdownAll()
-        {
-            if (State == ModuleManagerState.Stopped || State == ModuleManagerState.ShuttingDown) return;
-
-            if (State == ModuleManagerState.Registering || State == ModuleManagerState.Installing)
-            {
-                RemoveRegisteredRange(0);
-                State = ModuleManagerState.Stopped;
-                return;
-            }
-
-            State = ModuleManagerState.ShuttingDown;
-            for (int i = _updateList.Count - 1; i >= 0; i--)
-            {
-                SafeShutdown(_updateList[i]);
-            }
-            RemoveRegisteredRange(0);
-            State = ModuleManagerState.Stopped;
-        }
-
-        private void RollbackInitialization(int failedIndex)
-        {
-            for (int i = failedIndex; i >= 0; i--)
-            {
-                SafeShutdown(_updateList[i]);
-            }
-            RemoveRegisteredRange(0);
-        }
-
-        private void RollbackInstalledModules(int startIndex, int failedIndex)
-        {
-            for (int i = failedIndex; i >= startIndex; i--)
-            {
-                SafeShutdown(_updateList[i]);
-            }
-        }
-
-        private void RemoveRegisteredRange(int startIndex)
-        {
-            for (int i = _updateList.Count - 1; i >= startIndex; i--)
-            {
-                var module = _updateList[i];
-                _modules.Remove(module.GetType());
-                (module as ModuleSingletonBase)?.UnregisterInstance();
-                _updateList.RemoveAt(i);
-            }
-        }
-
-        private static void SafeShutdown(IModule module)
-        {
-            try
-            {
-                module.OnShutdown();
-            }
-            catch (Exception ex)
-            {
-                TryLogError($"[ModuleManager] {module.GetType().Name}.OnShutdown failed: {ex}");
+                await RemoveBatchAsync(0, 0);
+                _updates.Clear();
+                Current = null;
+                _shutdown.Dispose();
             }
             finally
             {
-                (module as ModuleSingletonBase)?.UnregisterInstance();
+                _batchGate.Release();
+                _stop.TrySetResult(true);
             }
         }
 
-        private static void TryLogError(string message)
+        private async Task AddBatchAsync(Action<ModuleManager> configure, bool startup)
         {
-            try { Log.Error(message); }
-            catch { }
+            CancellationToken stop = _shutdown.Token;
+            await _batchGate.WaitAsync(stop);
+            int start = _registered.Count;
+            int initialized = _initialized.Count;
+            using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(stop);
+            try
+            {
+                stop.ThrowIfCancellationRequested();
+                if (!startup && !IsRunning)
+                    throw new InvalidOperationException("Module startup did not complete.");
+
+                _registering = true;
+                try { configure(this); }
+                finally { _registering = false; }
+
+                foreach (var phase in _registered.Skip(start).GroupBy(entry => entry.Order).OrderBy(group => group.Key))
+                {
+                    var tasks = new List<Task>();
+                    foreach (var entry in phase) tasks.Add(InitializeAsync(entry.Module, cancellation));
+                    await Task.WhenAll(tasks);
+                }
+                stop.ThrowIfCancellationRequested();
+                for (int index = initialized; index < _initialized.Count; index++)
+                    if (_initialized[index] is IFrameUpdate update) _updates.Add(update);
+                IsRunning = true;
+            }
+            catch
+            {
+                await RemoveBatchAsync(start, initialized);
+                if (startup && _stop == null) Current = null;
+                throw;
+            }
+            finally { _batchGate.Release(); }
+        }
+
+        private async Task InitializeAsync(Module module, CancellationTokenSource cancellation)
+        {
+            cancellation.Token.ThrowIfCancellationRequested();
+            _initialized.Add(module);
+            try { await module.InitializeAsync(cancellation.Token); }
+            catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { throw; }
+            catch (Exception exception)
+            {
+                Cancel(cancellation);
+                throw new InvalidOperationException($"Cannot initialize module {module.GetType().Name}.", exception);
+            }
+        }
+
+        private static void Cancel(CancellationTokenSource cancellation)
+        {
+            try { cancellation.Cancel(); }
+            catch (Exception exception) { Log.Error("[Modules] Startup cancellation failed.", exception); }
+        }
+
+        private async Task RemoveBatchAsync(int start, int initialized)
+        {
+            for (int i = _initialized.Count - 1; i >= initialized; i--)
+            {
+                Module module = _initialized[i];
+                try { await module.ShutdownAsync(); }
+                catch (Exception exception) { Log.Error($"[Modules] {module.GetType().Name}.Shutdown failed.", exception); }
+            }
+            _initialized.RemoveRange(initialized, _initialized.Count - initialized);
+            for (int i = start; i < _registered.Count; i++) _modules.Remove(_registered[i].Module.GetType());
+            _registered.RemoveRange(start, _registered.Count - start);
         }
     }
 }

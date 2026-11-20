@@ -71,12 +71,12 @@ namespace EasyFramework.UI
             // 编辑模式销毁对象或切换场景时，组件会先禁用再销毁。
             // 在这里解除关联，避免静态 Manager 状态泄漏到下一个 Host。
             if (!Application.isPlaying) DetachManager();
+            else FlushDisposals();
         }
 
         private void OnDestroy()
         {
-            foreach (IDisposable disposable in _pendingDisposals) disposable?.Dispose();
-            _pendingDisposals.Clear();
+            FlushDisposals();
             ReleaseOwnedUICamera();
             DetachManager();
         }
@@ -214,6 +214,14 @@ namespace EasyFramework.UI
                 StartCoroutine(DisposeNextFrame(disposable));
             }
             else disposable.Dispose();
+        }
+
+        private void FlushDisposals()
+        {
+            if (_pendingDisposals.Count == 0) return;
+            var pending = new List<IDisposable>(_pendingDisposals);
+            _pendingDisposals.Clear();
+            foreach (IDisposable disposable in pending) disposable.Dispose();
         }
 
         private IEnumerator DisposeNextFrame(IDisposable disposable)

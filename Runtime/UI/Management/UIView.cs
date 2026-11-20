@@ -1,70 +1,65 @@
+using System;
+using System.Threading.Tasks;
+
 namespace EasyFramework.UI
 {
-    /// <summary>纯 C# View 业务基类，派生类型不能挂载到 Prefab。</summary>
-    public class UIView : UIObject
+    public abstract class UIView : UIObject
     {
-        public object OpenArgs { get; private set; }
-        public bool IsOpen => Display != null && Display.IsOpen;
-        public bool IsVisible => Display != null && Display.IsVisible;
-        public bool IsFocused => Display != null && Display.IsFocused;
-        public UILayer Layer => Display == null ? UILayer.Screen : Display.CurrentLayer;
-
-        public void Close() => Display?.Close();
-        public void Show() => Manager?.Show(this);
-        public void Hide() => Manager?.Hide(this);
-        public void BringToFront() => Display?.BringToFront();
-        public void SetLayer(UILayer layer) => Display?.SetLayer(layer);
-
-        internal void Open(object args)
-        {
-            OpenArgs = args;
-            OnOpened(args);
-        }
-
-        internal void Focus()
-        {
-            OnFocused();
-        }
-
-        internal void Blur()
-        {
-            OnBlurred();
-        }
-        internal void CloseInternal()
-        {
-            OnClosed();
-        }
-
-        protected virtual void OnOpened(object args) { }
-        protected virtual void OnFocused() { }
-        protected virtual void OnBlurred() { }
-        protected virtual void OnClosed() { }
+        protected new UIDisplay Display => (UIDisplay)base.Display;
+        public bool IsOpen => Display != null && !Display.IsClosing;
+        public Task CloseAsync() => Display == null ? Task.CompletedTask : Display.CloseAsync();
+        internal abstract void SetArguments(object args);
+        internal abstract void RefreshView();
+        internal virtual void CompleteResult() { }
     }
 
-    /// <summary>强类型 View 基类，默认以 View 自身作为绑定源。</summary>
     public abstract class UIView<TArgs> : UIView
     {
-        public TArgs Args { get; private set; }
+        internal sealed override void SetArguments(object args) => Args = (TArgs)args;
+        internal sealed override void RefreshView() => Render(() => Refresh(Args));
 
-        protected sealed override void OnOpened(object args)
+        protected TArgs Args { get; private set; }
+        protected virtual void Refresh(TArgs args) { }
+    }
+
+    public readonly struct UIResult<T>
+    {
+        public bool Confirmed { get; }
+        public T Value { get; }
+
+        internal UIResult(T value)
         {
-            if (args == null)
-            {
-                Args = default(TArgs);
-            }
-            else if (args is TArgs typed)
-            {
-                Args = typed;
-            }
-            else
-            {
-                throw new System.ArgumentException(
-                    $"{GetType().Name} expects open args {typeof(TArgs).FullName}, received {args.GetType().FullName}.",
-                    nameof(args));
-            }
-            OnOpened(Args);
+            Confirmed = true;
+            Value = value;
+        }
+    }
+
+    public abstract class UIPopup<TArgs, TResult> : UIView<TArgs>
+    {
+        private TaskCompletionSource<UIResult<TResult>> _request;
+        private UIResult<TResult> _result;
+
+        internal void BeginRequest(TaskCompletionSource<UIResult<TResult>> request)
+        {
+            _request?.TrySetResult(default);
+            _request = request;
+            _result = default;
         }
 
-        protected virtual void OnOpened(TArgs args) { }
+        internal bool OwnsRequest(TaskCompletionSource<UIResult<TResult>> request) =>
+            ReferenceEquals(_request, request);
+
+        protected Task ConfirmAsync(TResult value)
+        {
+            if (Display != null && !Display.IsClosing)
+                _result = new UIResult<TResult>(value);
+            return CloseAsync();
+        }
+
+        internal override void CompleteResult()
+        {
+            _request?.TrySetResult(_result);
+            _request = null;
+        }
     }
 }

@@ -1,0 +1,12 @@
+{
+    "name": "com.wjq.easyframework.yooasset",
+    "references": ["com.wjq.easyframework.runtime", "YooAsset"],
+    "defineConstraints": ["EASY_YOOASSET"],
+    "versionDefines": [
+        {
+            "name": "com.tuyoogame.yooasset",
+            "expression": "[3.0.7,4.0.0)",
+            "define": "EASY_YOOASSET"
+        }
+    ]
+}

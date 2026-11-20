@@ -1,215 +1,116 @@
-# EasyFramework UI 使用说明
+# UI 框架使用说明
 
-UI 采用“Prefab + 一个纯 C# View + 运行时 Binding”的结构。没有 ViewModel 要求，也不再生成第二个 Binding 脚本。
+## 创建界面和绑定控件
 
-## 先记住这三个角色
+1. 在 `Project Settings > EasyFramework UI` 设置 Prefab 目录、业务脚本默认目录、生成脚本目录、命名空间和资源包。可在「控件关键字映射」添加关键字并搜索组件类型。
+2. 打开 `Tools > EasyFramework > UI > UI Editor`，点「创建页面 / Node / Item」。输入类名，选择 `Screen`、`Popup`、`Node` 或 `Item`。已有对象可在 Inspector 配置挂载组件的类型和业务脚本。
+3. 在 Prefab 中按「关键字_属性名」命名节点，例如 `brn_SellButton`、`txt_CountLabel`，然后保存。工作台「引用」页可按选中节点已有的组件列出匹配关键字。
+4. 在业务脚本里直接写 `SellButton`、`CountLabel`。向导生成的 `.g.cs` 保存组件类型和访问代码，之后由编辑器维护。
 
-日常业务只需要接触前两个：
+默认映射包括 `brn` → `Button`、`txt` → `Text`、`img` → `Image` 和 `node` → `UINode`。新增映射时填写关键字并选择组件类型。同一界面的属性名应唯一，内嵌 Item 的控件从属于该 Item。改动已有关键字后，按新关键字调整受影响的 Prefab 节点名并保存。
 
-| 角色 | 职责 | 业务代码是否常用 |
-| --- | --- | --- |
-| `UIService` | 打开、查找、返回和关闭页面的统一入口 | 是 |
-| `UIView` | 一个页面的行为、状态和组件引用 | 是 |
-| `UIDisplay` / `UIManager` | Prefab 配置与底层页面栈 | 仅编辑器或高级扩展 |
+工作台「引用」页会显示改名后的属性。点「预览」可以跟到脚本里的使用位置，再点「确认改名并保存」同步生成文件、业务代码和 Prefab。业务引用按当前编辑器平台的 C# 编译条件解析。删除节点后可在此页移除失效引用。
 
-推荐保持单向调用：业务系统通过 `UIService` 打开页面，页面内部通过自身的 `Show`、`Hide`、`Close` 等方法控制显示。不要在普通页面逻辑里同时混用 Manager 和 Display。
+## 生成脚本目录与热更新
 
-## 1. 创建页面
+默认把生成文件集中存放在 `Assets/Generated/UI`。可在项目设置的「生成脚本目录」修改路径，现有生成文件随设置一起迁移。创建 UI 时可单独选择该页面或组件的业务脚本目录。移动业务脚本时，通过 Unity 移动资产并保留其 GUID，生成文件会跟随程序集归属调整。
 
-打开 `Tools/EasyFramework/UI/Create Display`，默认只需填写界面名称。Prefab 路径、脚本路径和命名空间会记住上次设置，资源地址默认自动生成为 `UI/<界面名称>`；只有项目使用特殊寻址规则时才展开高级设置修改。
+生成的 `.g.cs` 是业务类的 `partial` 部分，两者一起编译。有多个自定义程序集时，生成目录内按需要创建带 `.asmref` 的子目录，让各份生成文件编译到各自的业务程序集。使用 Unity 默认业务程序集的 UI，应将生成目录选在同一默认程序集覆盖的范围内。
 
-```text
-LoginView.prefab   // UIDisplay、可选 UIBindingContext、序列化引用
-LoginView.cs       // Args + View，唯一生成脚本
-```
+热更包的拆分单位仍是业务 DLL。按业务模块配置 `.asmdef` 后，各模块的生成绑定会随各自的 DLL 一起更新。热更资源收集按实际需要登记 DLL 和相关资源。
 
-生成的 View：
+## 页面、弹窗和返回
 
 ```csharp
-[UIPrefab("UI/LoginView")]
-public sealed class LoginView : UIView<LoginViewArgs>
+await InventoryView.OpenAsync(new InventoryViewArgs(playerId));
+
+var result = await SellDialog.ShowAsync(new SellDialogArgs(itemId));
+if (result.Confirmed)
+    await SellItemAsync(result.Value);
+
+await UIService.BackAsync();
+```
+
+- Screen 打开后会隐藏上一张 Screen。上一张页面仍持有原实例，返回时原滚动位置等界面状态可以保留，框架会再次执行 `Refresh` 读取最新数据。
+- 重复打开同类型会复用实例、更新参数并移到该层顶端。弹窗叠在 Screen 上，并可用遮罩阻挡背景输入。同一个弹窗再次打开时，先前的调用收到取消结果，新的调用等待玩家操作。
+- 弹窗可以用 `ConfirmAsync(value)` 返回值，返回键、遮罩、`CloseAsync` 默认产生取消结果。等待用的 `CancellationToken` 取消时，当前调用会抛出取消异常。
+- `UIService.Get<T>()` 可获取仍在栈中的界面，`UIService.CloseAsync<T>()` 可定向关闭，界面内部直接调用 `CloseAsync()`。框架在退场和对象清理后归还 Prefab 租约。
+- 全屏页面以最后一次开页请求为准。被后续请求或返回操作取代的任务会取消，调用方可按正常的取消流程处理。
+
+## 数据和交互
+
+常规数据在 `Refresh` 里赋值。调用方传 ID 等必要参数，View 从业务模块读取当前数据。按钮在 `OnCreated` 绑定一次。确实持续变化的字段可用 `Watch`，隐藏或关闭时自动取消订阅，恢复时直接读取当前值。
+
+```csharp
+public sealed partial class InventoryView : UIView<InventoryViewArgs>
 {
-    protected override void OnOpened(LoginViewArgs args)
+    protected override void OnCreated() =>
+        Click(SellButton, SellSelected);
+
+    protected override void Refresh(InventoryViewArgs args)
     {
-    }
-}
-```
-
-`UIView<TArgs>` 只有一个泛型参数。无参数页面可直接继承 `UIView`。
-
-## 2. 获取 Prefab 组件
-
-在 Prefab 任意节点添加 `UIReference` 并拖入目标组件。Target 赋值后 Inspector 会自动生成 Display 内唯一的 Key，也可以按项目习惯修改。例如：
-
-```text
-Key: CloseButton
-Target: Close/Button
-```
-
-View 中直接获取：
-
-```csharp
-Button close = Binding.Get<Button>("CloseButton");
-close.onClick.AddListener(Close);
-
-if (Binding.TryGet<Image>("Icon", out var icon))
-{
-    icon.enabled = true;
-}
-```
-
-引用保存在 Prefab，不需要修改或重新生成脚本。相同 Display 内 Key 必须唯一。
-
-如果引用还配置了 Resource Location：
-
-```csharp
-string location = Binding.GetResourceLocation("Icon");
-Sprite sprite = await Binding.LoadAsync<Sprite>(location);
-```
-
-Binding 销毁时会自动释放它持有的资源 Lease。
-
-## 3. 可选响应式绑定
-
-`UIBindingContext` 仍可用于少量确实需要的响应式绑定，但它是可选能力，不参与脚本生成。普通页面完全可以只使用 `UIReference + Binding.Get<T>()`。
-
-绑定 Source 会优先显示 View 上可绑定响应属性的下拉列表。`bind_` 自动收集默认采用合并模式，不会直接覆盖已有手工绑定；需要完全重建时可在确认窗口选择覆盖。
-
-## 4. 打开与关闭
-
-`OpenAsync` 使用 AssetModule 加载 Prefab。创建向导只负责生成 Prefab 和 View，不会自动注册资源模块或把 Prefab 放进 Loader。项目启动时先注册 AssetModule，在调用 `OpenAsync` 前设置 Loader 并等待初始化；Loader 中的地址必须与 View 的 `UIPrefab` 一致：
-
-```csharp
-// 在启动注册阶段执行一次：
-ModuleRegistry.AddRegistrar(modules => modules.Register<AssetModule>());
-
-// FrameworkLauncher 完成 Awake 后，以项目提供的 LoginView Prefab 初始化资源：
-var loader = new MemoryAssetLoader();
-loader.Add("UI/LoginView", loginPrefab);
-AssetModule.Instance.SetLoader(loader);
-await AssetModule.Instance.InitializeAsync();
-
-LoginView view = await UIService.OpenAsync<LoginView>();
-```
-
-如果项目使用 YooAsset，使用相同的地址规则配置其 Loader。编辑器中需要直接验证一个已有 Prefab 时，也可以调用 `UIService.Open<LoginView>(loginPrefab)`，它不经过 AssetModule。
-
-按生成脚本上的 `UIPrefab` 地址打开：
-
-```csharp
-LoginView view = await UIService.OpenAsync<LoginView>(args);
-```
-
-查询、返回和关闭也使用同一个入口：
-
-```csharp
-if (UIService.TryGet<LoginView>(out var login))
-{
-    login.Hide();
-    login.Show();
-}
-
-UIService.Back();             // 关闭最上层且响应返回的页面
-UIService.Close<LoginView>();
-UIService.CloseAll();
-```
-
-页面内部可直接控制自身，不需要绕回 Manager：
-
-```csharp
-public sealed class LoginView : UIView<LoginViewArgs>
-{
-    protected override void OnOpened(LoginViewArgs args)
-    {
-        Binding.Get<Button>("CloseButton").onClick.AddListener(Close);
+        var inventory = InventoryModule.Instance.Get(args.PlayerId);
+        TitleLabel.text = inventory.Title;
+        Watch(inventory.Count, count => CountLabel.text = count.ToString());
     }
 
-    private void Collapse() => Hide();
+    private void SellSelected() { /* 执行业务操作 */ }
 }
 ```
 
-只有动态资源地址等高级场景才显式指定地址：
+Item 的业务类继承 `UIItem`，复用时调用 `GetComponent<UIDisplay>().GetItem<MyItem>()` 取得一次实例。设置数据后调用 `Rebind()`，通过 Item 的 `Refresh()` 访问同样的强类型控件。回收时禁用 GameObject，框架会暂停 Item 的可见期订阅。
+
+## 独立组件 Node
+
+页面根节点使用 `UIDisplay`，独立组件根节点使用 `UINode`。向导选择 `Node` 会生成组件 Prefab 和继承 `UINodeView` 的业务脚本。也可给现有 RectTransform 添加 `UINode`，在 Inspector 关联脚本。
+
+把玩家卡 Prefab 放进页面后，将嵌套节点命名为 `node_PlayerCard`，再保存父 Prefab。父页面得到类型为 `PlayerCard` 的属性，子组件拥有自己的 `PlayerName` 和 `PlayerLevel`。默认的 `node` 关键字映射到 `UINode`，可在项目设置调整。
 
 ```csharp
-LoginView view = await UIService.OpenAtAsync<LoginView>(
-    "UI/LoginView",
-    args,
-    UILayer.Screen);
+protected override void Refresh(WorkbenchDemoViewArgs args)
+{
+    PlayerCard.SetPlayer("林星河", 28, health: 76, maxHealth: 100);
+}
 ```
 
-`Hide` 只隐藏实例，之后可以 `Show`；`Close` 会结束生命周期并释放 Binding 与资源。`UIManager` 仍负责资源 Lease、单例页面、返回键、层级、共享背景和关闭释放，但普通业务无需直接调用它。
+玩家卡内嵌独立的 `HealthBar` Prefab，实例名为 `node_HealthBar`。玩家卡直接调用生成的 `HealthBar.SetHealth(current, maximum)`，血条自己管理填充区和数值文字。组件在父页面初始化时自动创建，隐藏会暂停订阅并归还组件动态加载的资源，显示时使用最新数据刷新。关闭父页面会一并释放组件。可在 `FrameworkShowcase` 的「UI 工作台 · 制作闭环」演示里查看玩家卡和血条。
 
-需要取消异步打开时可传入 `CancellationToken`：
+## 虚拟列表
+
+1. 在 Scroll Rect 上添加 `UIVirtualList`，并配置列表下的 Viewport 和 Content。由虚拟列表负责计算 Content 尺寸和 Item 位置。
+2. 在「Item 模板」中添加多种 Prefab，例如 `header` 和 `item`。纵向和网格使用模板行高，横向使用模板项宽。可配置四边内边距、行或项间距、层级缩进，网格还可设置列数和列间距。网格的分组标题独占一行，组内子项按列排列。
+3. 点 Inspector 的「预览虚拟列表」，使用当前模板和布局查看示例数据、滚动和折叠效果。也可在 UI 工作台「适配」页打开预览。
+
+业务页通过 `SetItems` 提交树形数据。为每一项提供稳定、唯一的 Key，再次提交数据时可保留同 Key 分组的展开状态。仅选择展开的分支参与排版。
 
 ```csharp
-LoginView view = await UIService.OpenAsync<LoginView>(
-    args,
-    cancellationToken: token);
+InventoryList.SetItems(new[]
+{
+    new UIVirtualListRow<string>("weapons", "header", "武器",
+        new[] { new UIVirtualListRow<string>("sword", "item", "长剑") },
+        initiallyExpanded: true),
+});
 ```
 
-## 5. Loading 不属于 UI 框架
+列表 Item 继承 `UIListItem<T>`，在 `Refresh()` 中用 `Data` 取当前数据，通过 `Row` 取得层级、展开状态或调用 `Row.ToggleExpanded()`。控件仍按关键字生成，例如直接在 `OnCreated` 使用 `Click(RowButton, () => Row.ToggleExpanded())`。使用普通 Prefab 时也可给 `SetItems` 传一个绑定回调。
 
-Loading Prefab 是普通 UI 内容节点，不需要自带 Canvas，也不需要 `UIDisplay`、View 脚本或 `UIManager`。
+使用 `InventoryList.UpdateItem("sword", "强化长剑")` 按 Key 替换数据。已有数据对象的属性发生变化时，调用 `InventoryList.RefreshItem("sword")` 重新绑定。已渲染的项立即更新，屏幕外和折叠中的项下次显示时读取最新数据。换模板或调整树结构时继续使用 `SetItems`。
 
-在普通 Prefab 上挂 `LoadingPresenter`，配置进度条、文本、图片或视频列表，再将 Prefab 赋给 Startup Config 的 `全局 Loading > Prefab`。
+## UI 时间轴
 
-Prefab 为空表示不启用全局 Loading，框架不会隐式加载 Resources 中的同名资源。
+在页面或 Node 上添加 `UITimeline`，从 Inspector 打开「时间轴工作台」。在同一个组件里创建多段命名动画，例如 `Open`、`Close` 和 `Pulse`。
 
-`LoadingRuntimeHost` 会创建独立的 Canvas、CanvasScaler 和 GraphicRaycaster，并固定使用不依赖相机的 Overlay，确保加载画面直接渲染。Loading 与 UI 共用启动配置中的参考分辨率、宽高匹配值和 Layer，只单独配置 Prefab 与 Sorting Order。
+- **片段**支持在时间轴上拖动位置或拖拽右端调整时长，可从场景捕获起点和终点，也可填数值。
+- **关键帧**按目标与属性建立轨道。移动游标，调整目标后点「在游标处记录关键帧」。也可直接编辑关键帧值、拖动时间，并为每键设置到下一帧的缓动。
+- **预览**支持拖动标尺、输入时间、播放和暂停。停止、保存、退出工作台或进入 Play Mode 时，工作台恢复预览前的目标属性。
+- **自动开关**在工作台将动画「设为开场」或「设为退场」。自动进退场使用非缩放时间，关闭时等待退场播放完再释放页面。普通动效从生成的控件属性调用 `Timeline.Play("Pulse")`，使用时间轴配置的计时方式。
 
-```csharp
-await LoadingModule.Instance.LoadSceneAsync("Game");
+同一段动画中，不同属性可以并行。同一目标的同一属性发生片段重叠或关键帧时间重复时，工作台与构建校验会提示目标和时间。示例页面 `WorkbenchDemoView` 的开场同时使用缩放片段和旋转关键帧。
 
-await LoadingModule.Instance.RunAsync(
-    "正在匹配",
-    async progress =>
-    {
-        progress.Report(0.3f);
-        await MatchAsync();
-    });
-```
+## 资源与构建
 
-`LoadingModule` 只维护 `IsLoading`、`Progress`、`Message` 和 `Changed` 事件，不引用 EasyFramework UI。
+向导按项目设置生成页面地址，例如 `shop:UI/InventoryView`。将 UI Prefab 放入对应资源包的收集规则，并在启动配置里注册该包。使用 YooAsset 时，在包中启用可寻址地址，确认收集器生成的包内地址与 UIDisplay 一致。演示工程的 `showcase` 包由启动配置显式引用，适用于少量内置资源。分包项目可给不同收集目录设置对应资源包别名。
 
-## 6. 原生 UGUI 与扩展组件
+工作台「校验」会列出可定位的页面配置和组件问题。构建前会检查失效引用、重复页面类型或地址以及 Prefab 是否已被所配置的包收集。页面内部用 `LoadAssetAsync<T>(address)` 加载的资源归属于界面作用域，关闭时统一归还。
 
-页面里直接用 Unity 自带的 Image、Button、Text 即可。`UIReference`、状态机和 Binding 都不要求先换成框架组件。
-
-`Tools/EasyFramework/UI/UI Editor` 是页面工作台。选中 Prefab 或其子节点后，可在“页面、引用、状态、适配、动画、校验”间切换；校验页中的“定位”会选中并高亮需要修复的组件。
-从工作台点击“创建页面 / Item”，向导创建成功后会自动打开 Prefab Mode。状态页可在页面根节点添加 `UIStateController`；选中其下的节点后，可添加 `UIElement` 并记录状态外观。
-
-只有需要 **Sprite 列表 / 按索引切图** 时，才把 Image 换成 `UIImage`：
-
-- Inspector 标题栏：仅 Image / UIImage 显示切换按钮
-- `Tools/EasyFramework/UI/UI Editor` → `组件转换`：集中扫描、转换和还原选中层级
-- Image / UIImage 组件右键菜单：在两者之间转换
-
-框架不再提供没有额外行为的 Button、Text、Slider 等包装类型；这些组件直接使用原生 UGUI。唯一保留的扩展组件是提供 Sprite 列表能力的 `UIImage`。
-
-切换不会再自动挂上 `UIElement`。状态机是单独加的。
-
-## 7. UI 状态机
-
-在根节点挂 `UIStateController`，只在**会随状态变化的节点**上挂 `UIElement`。
-
-推荐编辑顺序：
-
-1. 在 Controller 的状态列表里添加任意多个状态（如 Normal、Hover、Disabled），并指定当前状态
-2. 点状态名，子节点会立刻切换到该状态
-3. 在 Scene / Inspector 里改颜色、图片、显隐；编辑器会自动记录受控属性，工作台以标记提示变化
-4. 若需显式记录或恢复，可使用工作台对应操作；切换状态时未记录的变化会提示记录、丢弃或取消
-5. 保存 Prefab 时会先写入默认外观，随后仍回到当前状态，避免把预览结果存进资源
-
-未勾选的属性沿用默认外观。工作台 `Tools/EasyFramework/UI/State Workbench` 用来按“状态 × 节点”查看和记录。不同分组可以把 Controller 挂在不同父节点上，子节点会跟随最近的父级 Controller。
-
-## 8. 引用 Key、适配与时间轴
-
-选中页面下的组件，在工作台“引用”页点击一键暴露，生成的 Key 只在最近的 `UIDisplay` 内有效。点击“生成 Key 常量”会在 View 脚本同目录创建 `*Keys.g.cs`，业务脚本可用这些常量访问引用。Key 改名后再次生成会列出旧常量的业务使用点；先修复使用点再提交。未绑定目标或重复 Key 在校验页报错。
-
-“适配”页提供 Anchor 与 Layout 预设、安全区组件以及常见分辨率轮廓预览。预览只读 Prefab，计算 Anchor、Pivot、Size Delta 和位置；`LayoutGroup` 的实际排列仍在 Game 视图检查。`UISafeArea` 只在运行时把选中的边映射到 `Screen.safeArea`。
-
-Item 模板通过“创建页面 / Item”向导选择“嵌套组件 Item”。Item 内的引用可以复用页面中已有的 Key；页面绑定只读取属于自己 `UIDisplay` 作用域的引用。长列表虚拟化应在有明确数据量、复用和滚动性能需求的业务列表中实现。
-
-演示场景中的 `WorkbenchListItem.prefab` 与 `UIVirtualList` 展示 80 条逻辑数据的可见行复用。列表只实例化视口范围内的 Item，滚动时重绑行号；页面禁用时移除滚动监听并销毁实例。大数据量列表应使用相同模式，并在具体业务中测量 Item 复杂度与滚动帧率。
-
-在节点添加 `UITimeline` 后，添加颜色、锚点位置、缩放或透明度片段，设置起点、时长、缓动及始末值。“动画”页打开 `Tween Timeline`，拖动进度可调用运行时同一 `TweenSequence.Seek`。退出预览、保存 Prefab、撤销或进入 Play Mode 都会恢复原始外观；运行时调用 `Play()`，关闭页面前调用 `Stop()`。
+头像、图标等会替换的图片可以在 `Refresh` 中调用 `SetSpriteAsync(Avatar, address)`。同一控件改图时以最新请求为准，新图到手后归还旧图。隐藏界面会取消待加载请求，并归还已绑定的动态图片。运行时选中 `[UI]`，Inspector 会显示每个页面的租约数及估算大小，共享资源可能在多个页面的估算值中出现。

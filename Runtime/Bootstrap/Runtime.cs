@@ -19,6 +19,5 @@ namespace EasyFramework
         public static bool IsWeb => Mode == RuntimeMode.Web;
 
         internal static void Configure(RuntimeMode mode) => Mode = mode;
-        internal static void Reset() => Mode = RuntimeMode.Editor;
     }
 }

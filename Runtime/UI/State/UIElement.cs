@@ -112,7 +112,7 @@ namespace EasyFramework.UI
                     bool foundText = false;
                     foreach (Component component in GetComponents<Component>())
                     {
-                        if (!UIComponentAdapter.TryGetText(component, out string text)) continue;
+                        if (!UIStateControlAccess.TryGetText(component, out string text)) continue;
                         variant.SetText(text);
                         foundText = true;
                         break;
@@ -178,7 +178,7 @@ namespace EasyFramework.UI
                 modified |= UIStateProperty.SpriteIndex;
             foreach (Component component in GetComponents<Component>())
             {
-                if (!UIComponentAdapter.TryGetText(component, out string text)) continue;
+                if (!UIStateControlAccess.TryGetText(component, out string text)) continue;
                 if (text != Expected(variant, UIStateProperty.Text).Text)
                     modified |= UIStateProperty.Text;
                 break;
@@ -303,7 +303,7 @@ namespace EasyFramework.UI
             }
             foreach (Component component in GetComponents<Component>())
             {
-                if (!UIComponentAdapter.TryGetText(component, out string text)) continue;
+                if (!UIStateControlAccess.TryGetText(component, out string text)) continue;
                 properties |= UIStateProperty.Text;
                 target.SetText(text);
                 break;
@@ -336,7 +336,7 @@ namespace EasyFramework.UI
             if ((properties & UIStateProperty.Text) != 0)
             {
                 foreach (Component component in GetComponents<Component>())
-                    if (UIComponentAdapter.TrySetText(component, variant.Text)) break;
+                    if (UIStateControlAccess.TrySetText(component, variant.Text)) break;
             }
             if ((properties & UIStateProperty.Value) != 0) ApplyValue(variant.Value);
             if ((properties & UIStateProperty.Active) != 0 && !variant.Active && gameObject.activeSelf)
@@ -349,7 +349,7 @@ namespace EasyFramework.UI
             if (TryGetComponent<Scrollbar>(out var scrollbar)) { value = scrollbar.value; return true; }
             if (TryGetComponent<Dropdown>(out var dropdown)) { value = dropdown.value; return true; }
             foreach (Component component in GetComponents<Component>())
-                if (UIComponentAdapter.TryReadDropdownValue(component, out value)) return true;
+                if (UIStateControlAccess.TryReadDropdownValue(component, out value)) return true;
             if (TryGetComponent<Toggle>(out var toggle)) { value = toggle.isOn ? 1f : 0f; return true; }
             if (TryGetComponent<Image>(out var image)) { value = image.fillAmount; return true; }
             value = 0f;
@@ -362,7 +362,7 @@ namespace EasyFramework.UI
             if (TryGetComponent<Scrollbar>(out var scrollbar)) { scrollbar.SetValueWithoutNotify(value); return; }
             if (TryGetComponent<Dropdown>(out var dropdown)) { dropdown.SetValueWithoutNotify(Mathf.RoundToInt(value)); return; }
             foreach (Component component in GetComponents<Component>())
-                if (UIComponentAdapter.TrySetDropdownValue(component, Mathf.RoundToInt(value))) return;
+                if (UIStateControlAccess.TrySetDropdownValue(component, Mathf.RoundToInt(value))) return;
             if (TryGetComponent<Toggle>(out var toggle)) toggle.SetIsOnWithoutNotify(value > 0.5f);
             else if (TryGetComponent<Image>(out var image)) image.fillAmount = value;
         }

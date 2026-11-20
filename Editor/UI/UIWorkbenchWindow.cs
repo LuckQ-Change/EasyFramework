@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
+using System.Text.RegularExpressions;
 using EasyFramework.UI;
 using UnityEditor;
 using UnityEditor.SceneManagement;
@@ -16,7 +18,8 @@ namespace EasyFramework.Editor.UI
 
         private Page _page;
         private Vector2 _scroll;
-        private UIReference _reference;
+        private UIControlRename _rename;
+        private UIBindingRoot _renameDisplay;
         private UIStateController _controller;
         private List<UIValidationIssue> _issues;
         private UnityEditor.Editor _inspector;
@@ -41,25 +44,24 @@ namespace EasyFramework.Editor.UI
 
         private void OnSelectionChange()
         {
-            _reference = null;
             _controller = null;
             _issues = null;
             ClearInspector();
             Repaint();
         }
 
-        private void OnHierarchyChange() => Repaint();
-        private void OnProjectChange() => Repaint();
+        private void OnHierarchyChange() { _issues = null; Repaint(); }
+        private void OnProjectChange() { _issues = null; Repaint(); }
 
         private void OnGUI()
         {
             GameObject selected = Selection.activeGameObject;
-            UIDisplay display = FindDisplay(selected);
+            UIBindingRoot display = FindDisplay(selected);
 
             EditorGUILayout.Space(6f);
             EditorGUILayout.LabelField("UI 工作台", new GUIStyle(EditorStyles.boldLabel) { fontSize = 17 });
             EditorGUILayout.BeginHorizontal();
-            if (GUILayout.Button("创建页面 / Item", GUILayout.Height(26f)))
+            if (GUILayout.Button("创建页面 / Node / Item", GUILayout.Height(26f)))
                 EditorApplication.ExecuteMenuItem("Tools/EasyFramework/UI/Create Display");
             using (new EditorGUI.DisabledScope(display == null))
                 if (GUILayout.Button("打开 Prefab", GUILayout.Height(26f))) OpenPrefab(display);
@@ -79,11 +81,11 @@ namespace EasyFramework.Editor.UI
             using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
             {
                 EditorGUILayout.ObjectField("选中节点", selected, typeof(GameObject), true);
-                EditorGUILayout.ObjectField("所属 Display", display, typeof(UIDisplay), true);
+                EditorGUILayout.ObjectField("所属界面 / Node", display, typeof(UIBindingRoot), true);
             }
             if (display == null)
             {
-                EditorGUILayout.HelpBox("在 Project、Hierarchy 或 Prefab Mode 中选择一个 UIDisplay 页面或其子节点。",
+                EditorGUILayout.HelpBox("在 Project、Hierarchy 或 Prefab Mode 中选择页面、Node 或其子节点。",
                     MessageType.Info);
                 EditorGUILayout.EndScrollView();
                 return;
@@ -101,75 +103,133 @@ namespace EasyFramework.Editor.UI
             EditorGUILayout.EndScrollView();
         }
 
-        private static UIDisplay FindDisplay(GameObject selected)
+        private static UIBindingRoot FindDisplay(GameObject selected)
         {
-            if (selected != null) return selected.GetComponentInParent<UIDisplay>(true);
+            if (selected != null) return selected.GetComponentInParent<UIBindingRoot>(true);
             PrefabStage stage = PrefabStageUtility.GetCurrentPrefabStage();
-            return stage == null ? null : stage.prefabContentsRoot.GetComponent<UIDisplay>();
+            return stage == null ? null : stage.prefabContentsRoot.GetComponent<UIBindingRoot>();
         }
 
-        private void DrawReferences(UIDisplay display, GameObject selected)
+        private void DrawReferences(UIBindingRoot display, GameObject selected)
         {
-            UIReference[] markers = display.GetComponentsInChildren<UIReference>(true);
-            UIReference selectedMarker = selected == null ? null : selected.GetComponent<UIReference>();
-            if (_reference == null || _reference.GetComponentInParent<UIDisplay>(true) != display)
-                _reference = selectedMarker != null ? selectedMarker :
-                    markers.Length > 0 ? markers[0] : null;
-
-            EditorGUILayout.LabelField($"引用节点：{markers.Length}", EditorStyles.boldLabel);
-            EditorGUILayout.BeginHorizontal();
-            foreach (UIReference marker in markers)
-                if (GUILayout.Toggle(marker == _reference, marker.name, EditorStyles.miniButton))
-                    _reference = marker;
-            EditorGUILayout.EndHorizontal();
-
-            bool canAdd = selected != null &&
-                selected.GetComponentInParent<UIDisplay>(true) == display &&
-                selected.GetComponent<UIReference>() == null && !AssetDatabase.Contains(selected);
-            using (new EditorGUI.DisabledScope(!canAdd))
-                if (GUILayout.Button("在选中节点添加 UIReference"))
-                    _reference = Undo.AddComponent<UIReference>(selected);
-
-            bool canExpose = selected != null && !AssetDatabase.Contains(selected) &&
-                selected.GetComponentInParent<UIDisplay>(true) == display;
-            using (new EditorGUI.DisabledScope(!canExpose))
-                if (GUILayout.Button("一键暴露选中节点组件"))
-                {
-                    try
-                    {
-                        _reference = UIReferenceEditorActions.Expose(display, selected);
-                        _referenceMessage = "已添加组件引用。";
-                        ClearInspector();
-                    }
-                    catch (Exception exception) { _referenceMessage = exception.Message; }
-                }
-            if (GUILayout.Button("生成引用 Key 常量"))
+            var stage = PrefabStageUtility.GetCurrentPrefabStage();
+            bool editable = stage != null && stage.prefabContentsRoot == display.gameObject;
+            if (_renameDisplay != display)
             {
-                try
-                {
-                    string path = UIReferenceCodeGenerator.Generate(display, out List<string> stale);
-                    _referenceMessage = stale.Count == 0
-                        ? $"已生成 {path}"
-                        : $"已生成 {path}，但旧 Key 仍有 {stale.Count} 处业务使用；请查看 Console。";
-                    foreach (string usage in stale) Debug.LogWarning("[UI] 旧引用 Key 使用点：" + usage, display);
-                }
-                catch (Exception exception) { _referenceMessage = exception.Message; }
+                _rename = null;
+                _renameDisplay = display;
+                _referenceMessage = null;
             }
+
+            EditorGUILayout.HelpBox("在 Prefab 中按「关键字_属性名」命名节点，例如 brn_CloseButton。保存后，View 可直接用 CloseButton。", MessageType.Info);
+            try
+            {
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    bool canExpose = editable && selected != null && selected != display.gameObject && FindDisplay(selected) == display;
+                    using (new EditorGUI.DisabledScope(!canExpose))
+                        if (GUILayout.Button("为选中节点选择关键字"))
+                            ShowKeywordMenu(selected, stage);
+                    if (GUILayout.Button("编辑关键字映射"))
+                        SettingsService.OpenProjectSettings(UIAuthoringSettings.SettingsPath);
+                }
+
+                var found = UIReferenceCodeGenerator.Scan(display).ToList();
+                foreach (UIControlReference slot in display.Controls)
+                {
+                    UIControlReference current = found.FirstOrDefault(control => UIReferenceCodeGenerator.SameNode(control, slot));
+                    using (new EditorGUILayout.HorizontalScope())
+                    {
+                        EditorGUILayout.ObjectField(slot?.Name ?? "失效引用", slot?.Target, typeof(Component), true);
+                        using (new EditorGUI.DisabledScope(!editable))
+                        {
+                            if (current != null && current.Target != slot.Target)
+                                EditorGUILayout.LabelField("保存后更新组件", GUILayout.Width(105f));
+                            else if (current != null && current.Name != slot.Name &&
+                                GUILayout.Button($"预览 → {current.Name}", GUILayout.MinWidth(140f)))
+                                _rename = UIControlRename.Preview(display, slot, current.Name);
+                            if (current == null && GUILayout.Button("移除") &&
+                                EditorUtility.DisplayDialog("移除控件引用", $"移除 {slot?.Name}？请一并删除业务中的使用。", "移除", "取消"))
+                            {
+                                var remaining = display.Controls.Where(control => !ReferenceEquals(control, slot)).ToArray();
+                                var code = UIReferenceCodeGenerator.Source(display, remaining);
+                                UIReferenceCodeGenerator.Write(UIReferenceCodeGenerator.GeneratedPath(display), code);
+                                display.SetControls(remaining);
+                                EditorUtility.SetDirty(display);
+                                EditorSceneManager.MarkSceneDirty(stage.scene);
+                                _issues = null;
+                            }
+                        }
+                    }
+                }
+
+                if (_rename != null)
+                {
+                    EditorGUILayout.LabelField(_rename.Description, EditorStyles.boldLabel);
+                    var usages = _rename.Usages.ToArray();
+                    if (usages.Length == 0) EditorGUILayout.LabelField("没有业务使用点。");
+                    foreach (var usage in usages)
+                        if (GUILayout.Button($"{usage.Path}:{usage.Line}", EditorStyles.miniButton))
+                            AssetDatabase.OpenAsset(AssetDatabase.LoadAssetAtPath<MonoScript>(usage.Path), usage.Line);
+                    using (new EditorGUILayout.HorizontalScope())
+                    {
+                        if (GUILayout.Button("取消预览")) _rename = null;
+                        else if (GUILayout.Button("确认改名并保存"))
+                        {
+                            _rename.Apply();
+                            _rename = null;
+                            _issues = null;
+                            _referenceMessage = "Prefab 和引用已同步。";
+                        }
+                    }
+                }
+
+                foreach (var control in found.Where(control => display.Controls.All(slot => !UIReferenceCodeGenerator.SameNode(slot, control))))
+                    EditorGUILayout.ObjectField($"待保存 · {control.Name}", control.Target, typeof(Component), true);
+            }
+            catch (Exception exception) { _referenceMessage = exception.GetBaseException().Message; }
             if (!string.IsNullOrEmpty(_referenceMessage))
                 EditorGUILayout.HelpBox(_referenceMessage, MessageType.Info);
-
-            if (_reference == null)
-                EditorGUILayout.HelpBox("在 Prefab 中选择节点并添加 UIReference，再拖入组件。", MessageType.Info);
-            else
-                DrawInspector(_reference);
         }
 
-        private void DrawStates(UIDisplay display, GameObject selected)
+        private static void ShowKeywordMenu(GameObject selected, PrefabStage stage)
+        {
+            var groups = UIAuthoringSettings.instance.BindingKeywords;
+            string name = selected.name;
+            int separator = name.IndexOf('_');
+            if (separator >= 0 && groups.Contains(name.Substring(0, separator)))
+                name = name.Substring(separator + 1);
+            name = Regex.Replace(name, "[^A-Za-z0-9_]", "");
+            if (!UIReferenceCodeGenerator.IsIdentifier(name) || !char.IsLetter(name[0]))
+                throw new InvalidOperationException("请给节点起一个以英文字母开头的控件属性名。");
+
+            var menu = new GenericMenu();
+            foreach (var group in groups)
+            {
+                if (group.Skip(1).Any()) continue;
+                var rule = group.First();
+                Type type = rule.ResolveType();
+                if (type == null || !selected.GetComponents(type).Any(component => component != null)) continue;
+                string nodeName = rule.Keyword + "_" + name;
+                menu.AddItem(new GUIContent($"{rule.Keyword} · {type.Name}"), selected.name == nodeName, () =>
+                {
+                    if (selected == null || PrefabStageUtility.GetCurrentPrefabStage() != stage) return;
+                    Undo.RecordObject(selected, "设置 UI 控件关键字");
+                    selected.name = nodeName;
+                    EditorSceneManager.MarkSceneDirty(stage.scene);
+                });
+            }
+            if (menu.GetItemCount() == 0)
+                menu.AddDisabledItem(new GUIContent("没有匹配此节点组件的关键字"));
+            menu.ShowAsContext();
+        }
+
+        private void DrawStates(UIBindingRoot display, GameObject selected)
         {
             UIStateController[] controllers = display.GetComponentsInChildren<UIStateController>(true);
             UIStateController selectedController = selected == null
                 ? null : selected.GetComponentInParent<UIStateController>(true);
-            if (_controller == null || _controller.GetComponentInParent<UIDisplay>(true) != display)
+            if (_controller == null || _controller.GetComponentInParent<UIBindingRoot>(true) != display)
                 _controller = selectedController != null ? selectedController :
                     controllers.Length > 0 ? controllers[0] : null;
 
@@ -201,13 +261,13 @@ namespace EasyFramework.Editor.UI
             if (GUILayout.Button("打开状态矩阵")) UIStateWorkbench.Open(_controller);
         }
 
-        private void DrawValidation(UIDisplay display)
+        private void DrawValidation(UIBindingRoot display)
         {
             EditorGUILayout.BeginHorizontal();
             EditorGUILayout.LabelField("页面校验", EditorStyles.boldLabel);
-            if (GUILayout.Button("重新校验", GUILayout.Width(100f))) _issues = UIValidator.FindIssues(display);
+            if (GUILayout.Button("重新校验", GUILayout.Width(100f))) _issues = UIValidator.FindIssues(display, validateAddress: true);
             EditorGUILayout.EndHorizontal();
-            if (_issues == null) _issues = UIValidator.FindIssues(display);
+            if (_issues == null) _issues = UIValidator.FindIssues(display, validateAddress: true);
             if (_issues.Count == 0)
             {
                 EditorGUILayout.HelpBox("当前页面校验通过。", MessageType.Info);
@@ -216,7 +276,7 @@ namespace EasyFramework.Editor.UI
             foreach (UIValidationIssue issue in _issues)
             {
                 EditorGUILayout.BeginHorizontal();
-                EditorGUILayout.HelpBox(issue.Message, MessageType.Warning);
+                EditorGUILayout.HelpBox(issue.Message, issue.Blocking ? MessageType.Error : MessageType.Warning);
                 using (new EditorGUI.DisabledScope(issue.Context == null))
                     if (GUILayout.Button("定位", GUILayout.Width(52f), GUILayout.MinHeight(38f)))
                     {
@@ -227,32 +287,35 @@ namespace EasyFramework.Editor.UI
             }
         }
 
-        private static void DrawAnimation(UIDisplay display, GameObject selected)
+        private static void DrawAnimation(UIBindingRoot display, GameObject selected)
         {
             UITimeline timeline = selected == null ? null : selected.GetComponent<UITimeline>();
             if (timeline == null) timeline = display.GetComponentInChildren<UITimeline>(true);
             bool canAdd = selected != null && !AssetDatabase.Contains(selected) &&
-                selected.GetComponentInParent<UIDisplay>(true) == display &&
+                selected.GetComponentInParent<UIBindingRoot>(true) == display &&
                 selected.GetComponent<UITimeline>() == null;
             using (new EditorGUI.DisabledScope(!canAdd))
                 if (GUILayout.Button("在选中节点添加 UITimeline"))
                     timeline = Undo.AddComponent<UITimeline>(selected);
             if (timeline == null)
-                EditorGUILayout.HelpBox("添加 UITimeline 后可配置颜色、位置、缩放或透明度片段。", MessageType.Info);
+                EditorGUILayout.HelpBox("添加 UITimeline 后可创建命名动画、片段和关键帧。", MessageType.Info);
             else
             {
                 EditorGUILayout.ObjectField("时间轴", timeline, typeof(UITimeline), true);
-                if (GUILayout.Button("打开可拖动时间轴")) UITimelineWorkbench.Open(timeline);
+                if (GUILayout.Button("打开时间轴工作台")) UITimelineWorkbench.Open(timeline);
             }
         }
 
-        private static void DrawAdaptation(UIDisplay display, GameObject selected)
+        private static void DrawAdaptation(UIBindingRoot display, GameObject selected)
         {
             if (GUILayout.Button("打开分辨率与安全区预览")) UIResolutionPreview.Open(display);
+            var list = selected == null ? null : selected.GetComponentInParent<UIVirtualList>(true);
+            if (list != null && list.GetComponentInParent<UIBindingRoot>(true) == display &&
+                GUILayout.Button("预览选中节点的虚拟列表")) UIVirtualListPreview.Open(list);
             if (GUILayout.Button("创建可复用 Item 模板")) UICreationWizard.OpenItemTemplate();
             RectTransform rect = selected == null ? null : selected.GetComponent<RectTransform>();
             bool editable = rect != null && !AssetDatabase.Contains(selected) &&
-                selected.GetComponentInParent<UIDisplay>(true) == display;
+                selected.GetComponentInParent<UIBindingRoot>(true) == display;
             EditorGUILayout.LabelField("选中节点 Anchor 预设", EditorStyles.boldLabel);
             using (new EditorGUI.DisabledScope(!editable))
             {
@@ -292,7 +355,7 @@ namespace EasyFramework.Editor.UI
             _inspectedObject = null;
         }
 
-        private static void OpenPrefab(UIDisplay display)
+        private static void OpenPrefab(UIBindingRoot display)
         {
             if (display == null) return;
             string path = AssetDatabase.GetAssetPath(display.gameObject);
