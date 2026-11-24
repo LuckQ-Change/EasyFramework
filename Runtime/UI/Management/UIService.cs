@@ -18,9 +18,16 @@ namespace EasyFramework.UI
             TView view = await Manager().OpenAsync<TView>(args, UIPageKind.Popup, token, popup => popup.BeginRequest(result));
             if (!token.CanBeCanceled || result.Task.IsCompleted) return await result.Task;
 
+#if (UNITY_WEBGL || WEIXINMINIGAME) && !UNITY_EDITOR
+            // 单线程 Player 没有可执行 WhenAny 完成通知的线程池。
+            while (!result.Task.IsCompleted && !token.IsCancellationRequested)
+                await Task.Yield();
+            if (!result.Task.IsCompleted)
+#else
             var canceled = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             using var registration = token.Register(() => canceled.TrySetResult(true));
             if (await Task.WhenAny(result.Task, canceled.Task) == canceled.Task)
+#endif
             {
                 if (view.OwnsRequest(result)) await view.CloseAsync();
                 token.ThrowIfCancellationRequested();

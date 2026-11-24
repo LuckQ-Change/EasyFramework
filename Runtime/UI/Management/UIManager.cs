@@ -266,9 +266,15 @@ namespace EasyFramework.UI
 
         private static async Task WaitForCloseAsync(Window window, CancellationToken token)
         {
+#if (UNITY_WEBGL || WEIXINMINIGAME) && !UNITY_EDITOR
+            // 关闭动画的回调会完成原始任务，随后在 Unity 主线程检查取消。
+            while (!window.Closed.Task.IsCompleted && !token.IsCancellationRequested)
+                await Task.Yield();
+#else
             var canceled = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             using var registration = token.Register(() => canceled.TrySetResult(true));
             await Task.WhenAny(window.Closed.Task, canceled.Task);
+#endif
             token.ThrowIfCancellationRequested();
         }
 
