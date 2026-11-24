@@ -384,7 +384,7 @@ namespace EasyFramework
             {
                 CancellationToken token = entry.QueueCancellation.Token;
                 await WaitForAsync(EnsurePackageAsync(entry.Package), token);
-                await _loadSlots.WaitAsync(token);
+                await WaitForSlotAsync(_loadSlots, token);
                 hasSlot = true;
                 if (entry.Retired) return;
                 entry.Loading = true;
@@ -440,7 +440,7 @@ namespace EasyFramework
             bool hasSlot = false;
             try
             {
-                await _packageSlots.WaitAsync(_shutdown.Token);
+                await WaitForSlotAsync(_packageSlots, _shutdown.Token);
                 hasSlot = true;
                 package.Loader ??= package.CreateLoader() ?? throw new InvalidOperationException("Asset loader factory returned null.");
                 await package.Loader.InitializeAsync();
@@ -622,14 +622,43 @@ namespace EasyFramework
         private static TaskCompletionSource<T> NewCompletion<T>() =>
             new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
 
+        private static Task WaitForSlotAsync(SemaphoreSlim slots, CancellationToken token)
+        {
+#if (UNITY_WEBGL || WEIXINMINIGAME) && !UNITY_EDITOR
+            return WaitForWebGLSlotAsync(slots, token);
+#else
+            return slots.WaitAsync(token);
+#endif
+        }
+
+#if (UNITY_WEBGL || WEIXINMINIGAME) && !UNITY_EDITOR
+        private static async Task WaitForWebGLSlotAsync(SemaphoreSlim slots, CancellationToken token)
+        {
+            // 槽位用尽时由 Unity 主线程重试，避免异步信号量依赖线程池唤醒排队操作。
+            token.ThrowIfCancellationRequested();
+            while (!slots.Wait(0))
+            {
+                await Task.Yield();
+                token.ThrowIfCancellationRequested();
+            }
+        }
+#endif
+
         private static async Task<T> WaitForAsync<T>(Task<T> operation, CancellationToken token)
         {
+#if (UNITY_WEBGL || WEIXINMINIGAME) && !UNITY_EDITOR
+            // WebGL 的 Task.WhenAny 会把异步延续的完成通知交给不可用的线程池。
+            // 在 Unity 主线程等待结果，取消只中断当前调用方，不影响共享加载。
+            while (!operation.IsCompleted && !token.IsCancellationRequested)
+                await Task.Yield();
+#else
             if (!operation.IsCompleted)
             {
                 var canceled = NewCompletion<bool>();
                 using (token.Register(() => canceled.TrySetResult(true)))
                     await Task.WhenAny(operation, canceled.Task);
             }
+#endif
             token.ThrowIfCancellationRequested();
             return await operation;
         }
