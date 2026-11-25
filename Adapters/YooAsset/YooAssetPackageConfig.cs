@@ -7,7 +7,7 @@ namespace EasyFramework
 {
     /// <summary>一个 YooAsset 包的构建名称、资源服务器与运行设置。</summary>
     [CreateAssetMenu(fileName = "YooAssetPackage", menuName = "EasyFramework/Assets/YooAsset Package")]
-    public sealed class YooAssetPackageConfig : AssetPackageConfig
+    public sealed class YooAssetPackageConfig : AssetPackageConfig, IYooAssetPackageConfig
     {
         [SerializeField] private string _packageName = "DefaultPackage";
         [SerializeField] private string _cdnRoot;

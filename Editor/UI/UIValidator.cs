@@ -236,13 +236,16 @@ namespace EasyFramework.Editor.UI
                 if (entries.Length > 1) throw new InvalidOperationException($"资源包 {package.Alias} 的地址 {address} 重复。");
                 return entries.Length == 1 && entries[0].Asset != null && AssetDatabase.GetAssetPath(entries[0].Asset) == prefabPath;
             }
-            if (package.GetType().FullName != "EasyFramework.YooAssetPackageConfig")
+            if (package is not IYooAssetPackageConfig yooAsset)
                 throw new InvalidOperationException($"资源包 {package.Alias} 暂无编辑期收集校验。");
 
-            string packageName = (string)package.GetType().GetProperty("PackageName").GetValue(package);
+            string packageName = yooAsset.PackageName?.Trim();
+            if (string.IsNullOrEmpty(packageName))
+                throw new InvalidOperationException($"资源包 {package.Alias} 缺少 YooAsset 包名。");
             if (!collected.TryGetValue(packageName, out var assets))
             {
-                Type collector = Type.GetType("YooAsset.Editor.BundleCollectorSettingData, YooAsset.Editor", true);
+                Type collector = Type.GetType("YooAsset.Editor.BundleCollectorSettingData, YooAsset.Editor", false)
+                    ?? throw new InvalidOperationException($"资源包 {package.Alias} 的编辑期校验需要安装 YooAsset。");
                 if (!(bool)collector.GetMethod("HasSettingAsset").Invoke(null, null))
                     throw new InvalidOperationException("YooAsset 缺少资源收集器配置。");
                 object setting = collector.GetProperty("Setting").GetValue(null);
