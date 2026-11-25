@@ -66,10 +66,10 @@ namespace EasyFramework.Tweening
             {
                 Track track = _tracks[i];
                 if (current < track.Start || track.Tween.IsKilled) continue;
+                float end = track.Start + track.Tween.Duration;
                 if (!track.Started)
                 {
                     // Seek 越过的子动画只同步画面；正常抵达的零时长节点仍需派发完成。
-                    float end = track.Start + track.Tween.Duration;
                     if (previous > end || (track.Tween.Duration > 0f && previous >= end))
                     {
                         track.Tween.SetPosition(track.Tween.Duration);
@@ -84,9 +84,11 @@ namespace EasyFramework.Tweening
                 else if (!track.Tween.IsPlaying && !track.Tween.IsComplete)
                     track.Tween.StartEmbedded();
                 if (track.Tween.IsComplete) continue;
-                float overlap = Mathf.Min(current, track.Start + track.Tween.Duration)
+                float overlap = Mathf.Min(current, end)
                     - Mathf.Max(previous, track.Start);
                 if (overlap >= 0f) track.Tween.Tick(overlap);
+                // 累加子动画的帧时间可能略短于时长，以序列上的终点为准收尾。
+                if (current >= end) track.Tween.Complete();
             }
 
             Elapsed = current;
