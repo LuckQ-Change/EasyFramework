@@ -197,10 +197,11 @@ namespace EasyFramework.Editor.UI
         {
             string[] scenes = EditorBuildSettings.scenes.Where(scene => scene.enabled).Select(scene => scene.path).ToArray();
             var paths = new HashSet<string>(AssetDatabase.GetDependencies(scenes, true), StringComparer.Ordinal);
+            const string configFileName = FrameworkStartupConfig.ResourceName + ".asset";
             foreach (string guid in AssetDatabase.FindAssets("t:FrameworkStartupConfig"))
             {
                 string path = AssetDatabase.GUIDToAssetPath(guid);
-                if (path.EndsWith("/Resources/FrameworkStartupConfig.asset", StringComparison.Ordinal)) paths.Add(path);
+                if (string.Equals(Path.GetFileName(path), configFileName, StringComparison.Ordinal)) paths.Add(path);
             }
             var result = new Dictionary<string, AssetPackageConfig>(StringComparer.Ordinal);
             foreach (string path in paths.Where(path => path.EndsWith(".asset", StringComparison.Ordinal)))
