@@ -2,41 +2,26 @@
 
 EasyFramework 是面向 Unity 2022.3 LTS 的轻量游戏框架。核心 Runtime 独立于可选的 YooAsset 适配程序集。
 
-默认提供事件、定时器、C# 对象池、Tween 和 [音频播放](doc/模块职责/Audio.md)。TCP、资源加载和 HybridCLR 热更能力保留在同一包内，由项目显式注册。框架关注生命周期、所有权和主线程派发，不试图替代成熟的资源、热更或协议库。
+默认提供事件、定时器、C# 对象池、Tween、[音频播放](doc/模块职责/Audio.md)和 [场景模块](doc/模块职责/Scene.md)。TCP、资源加载和 HybridCLR 热更能力保留在同一包内，由项目显式注册。框架关注生命周期、所有权和主线程派发，不试图替代成熟的资源、热更或协议库。
 
 ## 快速开始
 
-把目录放入 Unity 项目的 `Assets/`，在入口场景挂载 `FrameworkLauncher`。进入 Play Mode 后即可使用：
+把目录放入 Unity 项目的 `Assets/`，打开入口场景，通过 `Tools > EasyFramework > Setup Wizard` 选择最小本地、标准 UI 或在线更新。预览并应用后，保存入口场景。向导会创建 Startup Config 并绑定场景里的 `FrameworkLauncher`。 [安装步骤](doc/启动流程与运行模式.md#安装向导)
+
+标准 UI 和在线更新起点启用了定时器。调用方持有 Launcher 引用，等待宿主就绪后取用模块。
 
 ```csharp
-TimerModule.Instance.Delay(1f, () => Log.Info("hello"));
+await launcher.Ready;
+launcher.Modules.Require<TimerModule>().Delay(1f, () => Log.Info("hello"));
 ```
 
-Launcher 默认应用内置配置，创建持久化 UI 根节点、独立 UI Camera、Canvas 和 EventSystem。
-可通过 `Assets/Create/EasyFramework/Startup Config` 创建自定义配置，并挂到场景中的
-`FrameworkLauncher`。未赋值时，Launcher 会尝试读取 `Resources/FrameworkStartupConfig.asset`。
+默认宿主提供全局 UI 和默认模块作用域。隔离宿主使用指定配置、独立模块实例和运行模式，生命周期随 Launcher。每个 Launcher 都通过显式引用取得启动配置。
 
-Development Build 中会出现可拖动的 `DEBUGGER` FPS 悬浮框，点击可打开调试窗口。
-窗口提供 Console、Information、Profiler 和 Other 分组，可查看日志、异常堆栈、设备和性能信息。
-在 Startup Config 的“真机调试窗口”中选择 `Always` 可在正式包中启用，选择 `Disabled` 可关闭；
-没有 Launcher 的场景也会按 Resources 中的配置创建该窗口。日志只保留最近 500 条。
-
-按需模块通过 `ModuleRegistry.AddRegistrarAsync` 注册：
-
-```csharp
-[RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
-private static void RegisterModules()
-{
-    _ = ModuleRegistry.AddRegistrarAsync(modules =>
-    {
-        modules.Register<NetworkModule>();
-        modules.Register<HotfixModule>();
-    });
-}
-```
+可选 OnGUI Debug 由默认宿主的启动配置启用，支持日志、性能、资源租约和 UI 状态，程序集只参与编辑器及开发构建。模块装配器、宿主选择和诊断设置见 [启动流程与运行模式](doc/启动流程与运行模式.md)。
 
 完整 API 和生命周期说明见 [使用说明](doc/使用说明.md)，框架约束和测试要求见 [开发指南](doc/开发指南.md)。
 分阶段的职责审查、UI 编辑器与动画优化见 [开发优化计划](doc/开发优化计划.md)。
+2.0 的分层设计、工具改造、YooAsset + HybridCLR 组合与发布验收见 [2.0 优化路线](doc/2.0优化路线.md)。
 各模块的所有权与异常收尾见 [模块职责](doc/模块职责)。
 Tween API 与播放语义见 [Tween 使用说明](doc/Tween使用说明.md)。
 
@@ -60,7 +45,6 @@ UI 业务统一通过 `UIService` 打开、查找和关闭纯 C# View；Prefab �
 - UI 只生成一个 `Args + View` 脚本；Prefab 引用由运行时 Binding 读取，不强制 ViewModel。
 - 框架只保留流程基类、上下文和调度模块；具体流程由项目定义，可直接访问项目 UI 与业务脚本。
 - 运行模式：Editor、Online、Offline、Web。
-- UI 与全局 Loading 共用一套屏幕适配配置；Loading Prefab 为空时不创建，也不会隐式查找 Resources。
-- 全局 Loading 不依赖 UI 框架，支持场景切换、图片轮换、视频列表、进度和配置文本轮询。
+- `SceneModule` 按场景句柄管理切换、叠加和卸载。项目界面可读取 `State` 并订阅 `Changed` 展示进度。
 
 详见 [启动流程与运行模式](doc/启动流程与运行模式.md) 和 [UI 框架使用说明](doc/UI框架使用说明.md)。

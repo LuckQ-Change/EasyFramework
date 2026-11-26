@@ -1,0 +1,19 @@
+{
+    "name": "com.wjq.easyframework.yooasset.editor",
+    "references": [
+        "com.wjq.easyframework.runtime",
+        "com.wjq.easyframework.editor",
+        "com.wjq.easyframework.yooasset",
+        "YooAsset",
+        "YooAsset.Editor"
+    ],
+    "includePlatforms": ["Editor"],
+    "defineConstraints": ["EASY_YOOASSET"],
+    "versionDefines": [
+        {
+            "name": "com.tuyoogame.yooasset",
+            "expression": "[3.0.7,4.0.0)",
+            "define": "EASY_YOOASSET"
+        }
+    ]
+}

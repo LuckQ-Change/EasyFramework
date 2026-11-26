@@ -1,0 +1,12 @@
+{
+    "name": "com.wjq.easyframework.hybridclr",
+    "references": ["com.wjq.easyframework.runtime", "HybridCLR.Runtime"],
+    "defineConstraints": ["EASY_HYBRIDCLR"],
+    "versionDefines": [
+        {
+            "name": "com.code-philosophy.hybridclr",
+            "expression": "1.0.0",
+            "define": "EASY_HYBRIDCLR"
+        }
+    ]
+}

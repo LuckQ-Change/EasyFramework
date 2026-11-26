@@ -1,6 +1,6 @@
 {
   "name": "com.wjq.easyframework",
-  "version": "1.1.2",
+  "version": "1.1.3",
   "displayName": "EasyFramework",
   "description": "面向 Unity 2022.3 LTS 的轻量游戏框架，提供模块生命周期、UI 工作台、音频、事件、定时器和 Tween，并支持可选的资源、网络和热更接入。",
   "unity": "2022.3",

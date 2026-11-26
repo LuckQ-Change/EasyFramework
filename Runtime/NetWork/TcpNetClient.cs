@@ -7,44 +7,35 @@ using System.Threading.Tasks;
 
 namespace EasyFramework
 {
-    internal enum NetEventType
+    /// <summary>提供基于 TCP 的分帧传输，按连接代数隔离收发与关闭。</summary>
+    public class TcpNetClient : INetworkTransport
     {
-        Connected,
-        Disconnected,
-        Message,
-    }
-
-    internal struct NetEvent
-    {
-        public int Generation;
-        public NetEventType Type;
-        public NetMessage Message;
-        public string Reason;
-    }
-
-    /// <summary>管理一个 TCP 连接代数的收发和取消；旧连接不能清理新连接。</summary>
-    public class TcpNetClient
-    {
+        /// <summary>单次连接持有的套接字、取消令牌和关闭状态。</summary>
         private sealed class ConnectionContext
         {
             public int Generation;
             public TcpClient Tcp;
             public NetworkStream Stream;
             public CancellationTokenSource Cancellation;
+            public CancellationToken Token;
             public readonly SemaphoreSlim SendGate = new SemaphoreSlim(1, 1);
             public int Connected;
-            public int Closed;
+            public bool IsClosed;
         }
 
         private readonly object _stateLock = new object();
         private readonly SemaphoreSlim _connectGate = new SemaphoreSlim(1, 1);
-        private readonly ConcurrentQueue<NetEvent> _events = new ConcurrentQueue<NetEvent>();
+        private readonly ConcurrentQueue<NetworkTransportEvent> _events = new ConcurrentQueue<NetworkTransportEvent>();
         private ConnectionContext _current;
+        private bool _isDisposed;
         private int _generation;
         private int _pendingEventCount;
         private int _maxFrameSize = 1024 * 1024;
         private int _maxPendingEvents = 4096;
 
+        #region 公共方法
+
+        /// <summary>单帧正文允许的最大字节数，包含四字节消息 ID。</summary>
         public int MaxFrameSize
         {
             get => Volatile.Read(ref _maxFrameSize);
@@ -55,6 +46,7 @@ namespace EasyFramework
             }
         }
 
+        /// <summary>接收消息的队列预算，包含已排队的控制事件。</summary>
         public int MaxPendingEvents
         {
             get => Volatile.Read(ref _maxPendingEvents);
@@ -65,25 +57,32 @@ namespace EasyFramework
             }
         }
 
+        /// <summary>当前连接是否已建立且可用。</summary>
         public bool IsConnected
         {
             get
             {
-                lock (_stateLock)
-                {
-                    return _current != null && Volatile.Read(ref _current.Connected) != 0;
-                }
+                lock (_stateLock) return IsConnectionUsable(_current);
             }
         }
 
-        // 连接关闭后仍需保留代数，才能识别排队中的旧连接控制事件。
-        internal int LatestGeneration => Volatile.Read(ref _generation);
+        /// <summary>最近一次连接尝试的代数，断开后仍保留供事件派发判断。</summary>
+        public int LatestGeneration => Volatile.Read(ref _generation);
 
+        /// <summary>连接指定 TCP 地址和端口。</summary>
+        /// <param name="host">目标主机名或 IP 地址。</param>
+        /// <param name="port">目标 TCP 端口。</param>
+        /// <returns>连接建立或已有可用连接时返回 true。</returns>
         public Task<bool> ConnectAsync(string host, int port)
         {
             return ConnectAsync(host, port, CancellationToken.None);
         }
 
+        /// <summary>建立可取消的 TCP 连接。</summary>
+        /// <param name="host">目标主机名或 IP 地址。</param>
+        /// <param name="port">目标 TCP 端口。</param>
+        /// <param name="cancellationToken">取消排队、拨号或后续连接的令牌。</param>
+        /// <returns>连接建立或已有可用连接时返回 true。</returns>
         public async Task<bool> ConnectAsync(string host, int port, CancellationToken cancellationToken)
         {
             if (string.IsNullOrWhiteSpace(host)) throw new ArgumentException("Host is required.", nameof(host));
@@ -92,46 +91,53 @@ namespace EasyFramework
             await _connectGate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
-                if (IsConnected) return true;
-
+                cancellationToken.ThrowIfCancellationRequested();
                 ConnectionContext previous;
-                lock (_stateLock) previous = _current;
+                lock (_stateLock)
+                {
+                    ThrowIfDisposed();
+                    if (IsConnectionUsable(_current)) return true;
+                    previous = _current;
+                }
                 if (previous != null) Cleanup(previous, "reconnect");
 
-                var context = new ConnectionContext
+                ConnectionContext context;
+                lock (_stateLock)
                 {
-                    Generation = Interlocked.Increment(ref _generation),
-                    Tcp = new TcpClient(),
-                    Cancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken),
-                };
+                    // 终止与发布新连接使用同一把锁，防止等待拨号的任务在停止后重新建连。
+                    ThrowIfDisposed();
+                    cancellationToken.ThrowIfCancellationRequested();
+                    context = new ConnectionContext
+                    {
+                        Generation = Interlocked.Increment(ref _generation),
+                        Tcp = new TcpClient(),
+                        Cancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken),
+                    };
+                    context.Token = context.Cancellation.Token;
+                    _current = context;
+                }
 
-                lock (_stateLock) _current = context;
                 try
                 {
-                    await context.Tcp.ConnectAsync(host, port).ConfigureAwait(false);
+                    await ConnectSocketAsync(context, host, port).ConfigureAwait(false);
 
                     lock (_stateLock)
                     {
-                        if (!ReferenceEquals(_current, context) || context.Closed != 0)
-                        {
-                            CloseContext(context);
-                            return false;
-                        }
+                        if (!ReferenceEquals(_current, context) || context.IsClosed) return false;
                         context.Stream = context.Tcp.GetStream();
+                        context.Token.ThrowIfCancellationRequested();
+
+                        // 建连状态和事件一起提交，断开时由同一把锁决定先后顺序。
                         Volatile.Write(ref context.Connected, 1);
+                        EnqueueControl(new NetworkTransportEvent(context.Generation, NetworkTransportEventType.Connected));
                     }
 
-                    EnqueueControl(new NetEvent
-                    {
-                        Generation = context.Generation,
-                        Type = NetEventType.Connected,
-                    });
                     _ = ReceiveLoop(context);
                     return true;
                 }
                 catch (Exception ex)
                 {
-                    Cleanup(context, ex.Message);
+                    Cleanup(context, context.Token.IsCancellationRequested ? "canceled" : ex.Message);
                     return false;
                 }
             }
@@ -141,11 +147,19 @@ namespace EasyFramework
             }
         }
 
+        /// <summary>提交消息发送并记录抛出的异常。</summary>
+        /// <param name="msgId">消息 ID。</param>
+        /// <param name="payload">消息负载，可为空。</param>
         public void Send(int msgId, byte[] payload)
         {
             _ = SendAndForgetAsync(msgId, payload);
         }
 
+        /// <summary>将消息编码成完整帧并写入当前连接。</summary>
+        /// <param name="msgId">消息 ID。</param>
+        /// <param name="payload">消息负载，可为空。</param>
+        /// <param name="cancellationToken">取消等待发送或写入的令牌。</param>
+        /// <returns>写入成功时返回 true。</returns>
         public async Task<bool> SendAsync(
             int msgId,
             byte[] payload,
@@ -153,7 +167,7 @@ namespace EasyFramework
         {
             ConnectionContext context;
             lock (_stateLock) context = _current;
-            if (context == null || Volatile.Read(ref context.Connected) == 0) return false;
+            if (!IsConnectionUsable(context)) return false;
 
             int payloadLength = payload?.Length ?? 0;
             int bodyLength = checked(4 + payloadLength);
@@ -176,7 +190,8 @@ namespace EasyFramework
                 {
                     lock (_stateLock)
                     {
-                        if (!ReferenceEquals(_current, context) || context.Connected == 0) return false;
+                        if (!ReferenceEquals(_current, context) || context.Connected == 0 || context.Token.IsCancellationRequested)
+                            return false;
                     }
                     writeStarted = true;
                     await context.Stream.WriteAsync(
@@ -194,7 +209,7 @@ namespace EasyFramework
             }
             catch (Exception ex)
             {
-                Cleanup(context, ex.Message);
+                Cleanup(context, context.Token.IsCancellationRequested ? "canceled" : ex.Message);
                 return false;
             }
             finally
@@ -203,12 +218,7 @@ namespace EasyFramework
             }
         }
 
-        private async Task SendAndForgetAsync(int msgId, byte[] payload)
-        {
-            try { await SendAsync(msgId, payload).ConfigureAwait(false); }
-            catch (Exception ex) { Log.Error("[Network] send failed.", ex); }
-        }
-
+        /// <summary>取消当前拨号或主动断开已建立的连接。</summary>
         public void Disconnect()
         {
             ConnectionContext context;
@@ -216,9 +226,12 @@ namespace EasyFramework
             if (context != null) Cleanup(context, "manual");
         }
 
-        internal bool TryDequeue(out NetEvent netEvent)
+        /// <summary>按队列顺序读取一个事件，队列为空时立即返回。</summary>
+        /// <param name="transportEvent">读到的连接、消息或断开事件。</param>
+        /// <returns>读到事件时返回 true。</returns>
+        public bool TryDequeue(out NetworkTransportEvent transportEvent)
         {
-            if (_events.TryDequeue(out netEvent))
+            if (_events.TryDequeue(out transportEvent))
             {
                 Interlocked.Decrement(ref _pendingEventCount);
                 return true;
@@ -226,9 +239,68 @@ namespace EasyFramework
             return false;
         }
 
-        internal void ClearEvents()
+        #endregion
+
+        #region 生命周期
+
+        /// <summary>关闭套接字和队列，并停止接受新的连接尝试。</summary>
+        public void Dispose()
         {
+            ConnectionContext context;
+            lock (_stateLock)
+            {
+                if (_isDisposed) return;
+                _isDisposed = true;
+                context = _current;
+                _current = null;
+            }
+            if (context != null) Cleanup(context, "disposed");
             while (TryDequeue(out _)) { }
+        }
+
+        #endregion
+
+        #region 私有逻辑
+
+        private void ThrowIfDisposed()
+        {
+            if (_isDisposed) throw new ObjectDisposedException(nameof(TcpNetClient));
+        }
+
+        private static bool IsConnectionUsable(ConnectionContext context) =>
+            context != null && Volatile.Read(ref context.Connected) != 0 && !context.Token.IsCancellationRequested;
+
+        private async Task SendAndForgetAsync(int msgId, byte[] payload)
+        {
+            try { await SendAsync(msgId, payload).ConfigureAwait(false); }
+            catch (Exception ex) { Log.Error("[Network] send failed.", ex); }
+        }
+
+        private static async Task ConnectSocketAsync(ConnectionContext context, string host, int port)
+        {
+            // 底层拨号不接收令牌，取消时关闭本次套接字并结束等待，释放连接队列。
+            var canceled = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            using var registration = context.Token.Register(() =>
+            {
+                canceled.TrySetResult(true);
+                CloseTcp(context.Tcp);
+            });
+            context.Token.ThrowIfCancellationRequested();
+
+            Task connect = context.Tcp.ConnectAsync(host, port);
+            if (await Task.WhenAny(connect, canceled.Task).ConfigureAwait(false) != connect)
+            {
+                _ = ObserveCanceledConnectAsync(connect);
+                context.Token.ThrowIfCancellationRequested();
+            }
+            await connect.ConfigureAwait(false);
+        }
+
+        private static async Task ObserveCanceledConnectAsync(Task connect)
+        {
+            // 已取消的底层拨号可能延迟完成，观察其异常以免影响后续连接。
+            try { await connect.ConfigureAwait(false); }
+            catch { }
         }
 
         private async Task ReceiveLoop(ConnectionContext context)
@@ -236,7 +308,9 @@ namespace EasyFramework
             var header = new byte[4];
             try
             {
-                while (!context.Cancellation.IsCancellationRequested)
+                // 取消连接时关闭套接字，让等待中的读取退出。
+                using var registration = context.Token.Register(() => CloseTcp(context.Tcp));
+                while (!context.Token.IsCancellationRequested)
                 {
                     if (!await ReadExact(context, header, 4).ConfigureAwait(false)) break;
                     int bodyLength = ReadInt(header, 0);
@@ -255,14 +329,9 @@ namespace EasyFramework
                         var payload = new byte[bodyLength - 4];
                         Buffer.BlockCopy(body, 4, payload, 0, payload.Length);
 
-                        if (!TryEnqueueMessage(new NetEvent
-                            {
-                                Generation = context.Generation,
-                                Type = NetEventType.Message,
-                                Message = new NetMessage(msgId, payload),
-                            }))
+                        if (!TryEnqueueMessage(context, new NetMessage(msgId, payload)))
                         {
-                            Cleanup(context, "receive event queue overflow");
+                            Cleanup(context, context.Token.IsCancellationRequested ? "canceled" : "receive event queue overflow");
                             return;
                         }
                     }
@@ -271,7 +340,7 @@ namespace EasyFramework
                         ArrayPool<byte>.Shared.Return(body);
                     }
                 }
-                Cleanup(context, "eof");
+                Cleanup(context, context.Token.IsCancellationRequested ? "canceled" : "eof");
             }
             catch (OperationCanceledException)
             {
@@ -279,7 +348,7 @@ namespace EasyFramework
             }
             catch (Exception ex)
             {
-                Cleanup(context, ex.Message);
+                Cleanup(context, context.Token.IsCancellationRequested ? "canceled" : ex.Message);
             }
         }
 
@@ -292,7 +361,7 @@ namespace EasyFramework
             while (read < count)
             {
                 int length = await context.Stream.ReadAsync(
-                    buffer, read, count - read, context.Cancellation.Token).ConfigureAwait(false);
+                    buffer, read, count - read, context.Token).ConfigureAwait(false);
                 if (length <= 0) return false;
                 read += length;
             }
@@ -301,47 +370,60 @@ namespace EasyFramework
 
         private void Cleanup(ConnectionContext context, string reason)
         {
-            if (context == null || Interlocked.Exchange(ref context.Closed, 1) != 0) return;
+            if (context == null) return;
 
             lock (_stateLock)
             {
+                if (context.IsClosed) return;
+                context.IsClosed = true;
                 if (ReferenceEquals(_current, context)) _current = null;
+                Volatile.Write(ref context.Connected, 0);
             }
-            Volatile.Write(ref context.Connected, 0);
             CloseContext(context);
 
-            EnqueueControl(new NetEvent
+            lock (_stateLock)
             {
-                Generation = context.Generation,
-                Type = NetEventType.Disconnected,
-                Reason = reason,
-            });
+                if (_isDisposed) return;
+                EnqueueControl(new NetworkTransportEvent(context.Generation, NetworkTransportEventType.Disconnected,
+                    reason: reason));
+            }
         }
 
         private static void CloseContext(ConnectionContext context)
         {
             try { context.Cancellation?.Cancel(); } catch { }
             try { context.Stream?.Close(); } catch { }
-            try { context.Tcp?.Close(); } catch { }
+            CloseTcp(context.Tcp);
             try { context.Cancellation?.Dispose(); } catch { }
         }
 
-        private bool TryEnqueueMessage(NetEvent netEvent)
+        private static void CloseTcp(TcpClient tcp)
         {
-            int count = Interlocked.Increment(ref _pendingEventCount);
-            if (count > MaxPendingEvents)
-            {
-                Interlocked.Decrement(ref _pendingEventCount);
-                return false;
-            }
-            _events.Enqueue(netEvent);
-            return true;
+            try { tcp?.Close(); } catch { }
         }
 
-        private void EnqueueControl(NetEvent netEvent)
+        private bool TryEnqueueMessage(ConnectionContext context, NetMessage message)
+        {
+            // 断开已提交时丢弃刚读完的帧，避免断开后继续派发同一连接的消息。
+            lock (_stateLock)
+            {
+                if (!ReferenceEquals(_current, context) || context.IsClosed || context.Token.IsCancellationRequested)
+                    return false;
+                int count = Interlocked.Increment(ref _pendingEventCount);
+                if (count > MaxPendingEvents)
+                {
+                    Interlocked.Decrement(ref _pendingEventCount);
+                    return false;
+                }
+                _events.Enqueue(new NetworkTransportEvent(context.Generation, NetworkTransportEventType.Message, message));
+                return true;
+            }
+        }
+
+        private void EnqueueControl(NetworkTransportEvent transportEvent)
         {
             Interlocked.Increment(ref _pendingEventCount);
-            _events.Enqueue(netEvent);
+            _events.Enqueue(transportEvent);
         }
 
         private static void WriteInt(byte[] buffer, int offset, int value)
@@ -359,5 +441,7 @@ namespace EasyFramework
                  | (buffer[offset + 2] << 8)
                  | buffer[offset + 3];
         }
+
+        #endregion
     }
 }

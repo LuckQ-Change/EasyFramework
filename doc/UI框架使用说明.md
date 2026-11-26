@@ -3,7 +3,7 @@
 ## 创建界面和绑定控件
 
 1. 在 `Project Settings > EasyFramework UI` 设置 Prefab 目录、业务脚本默认目录、生成脚本目录、命名空间和资源包。可在「控件关键字映射」添加关键字并搜索组件类型。
-2. 打开 `Tools > EasyFramework > UI > UI Editor`，点「创建页面 / Node / Item」。输入类名，选择 `Screen`、`Popup`、`Node` 或 `Item`。已有对象可在 Inspector 配置挂载组件的类型和业务脚本。
+2. 通过 `Assets > Create > EasyFramework > UI > Page Manifest` 创建页面清单，在 Startup Config 的「UI 启动」中关联。打开 `Tools > EasyFramework > UI > UI Editor`，点「创建页面 / Node / Item」。创建 `Screen` 或 `Popup` 时选择该清单，确认页面 ID。向导生成 Prefab、View 和工厂，同时登记页面。Node 与 Item 仍通过各自组件绑定。
 3. 在 Prefab 中按「关键字_属性名」命名节点，例如 `brn_SellButton`、`txt_CountLabel`，然后保存。工作台「引用」页可按选中节点已有的组件列出匹配关键字。
 4. 在业务脚本里直接写 `SellButton`、`CountLabel`。向导生成的 `.g.cs` 保存组件类型和访问代码，之后由编辑器维护。
 
@@ -13,11 +13,25 @@
 
 ## 生成脚本目录与热更新
 
-默认把生成文件集中存放在 `Assets/Generated/UI`。可在项目设置的「生成脚本目录」修改路径，现有生成文件随设置一起迁移。创建 UI 时可单独选择该页面或组件的业务脚本目录。移动业务脚本时，通过 Unity 移动资产并保留其 GUID，生成文件会跟随程序集归属调整。
+生成脚本默认放在 `Assets/GameMain/Runtime/Generated/`。在项目设置中修改「生成脚本目录」会移动现有生成文件。创建 UI 时可单独选择业务脚本目录。通过 Unity 移动业务脚本时，生成文件会跟随程序集归属调整。
 
 生成的 `.g.cs` 是业务类的 `partial` 部分，两者一起编译。有多个自定义程序集时，生成目录内按需要创建带 `.asmref` 的子目录，让各份生成文件编译到各自的业务程序集。使用 Unity 默认业务程序集的 UI，应将生成目录选在同一默认程序集覆盖的范围内。
 
-热更包的拆分单位仍是业务 DLL。按业务模块配置 `.asmdef` 后，各模块的生成绑定会随各自的 DLL 一起更新。热更资源收集按实际需要登记 DLL 和相关资源。
+热更包的拆分单位仍是业务 DLL，生成绑定随各自的 DLL 交付。常规程序集由 Unity 运行时初始化回调登记页面工厂。动态加载的 DLL 由热更入口显式调用相应 View 的 `RegisterPageFactory()`，入口任务成功后再开放受管页面资源。
+
+## 页面清单
+
+清单统一保存页面 ID、Prefab 地址、Screen 或 Popup 路由、返回键和遮罩策略，以及基于 View 脚本 GUID 的工厂键。Prefab 持有控件绑定和过渡配置。清单保存 Prefab GUID 供编辑器定位，资源按已登记地址加载。
+
+`InventoryView.OpenAsync(...)`、`UIService.OpenAsync<...>(...)` 和按 ID 开页使用同一条登记。页面 ID 可用于协议、本地导航或菜单配置。
+
+```csharp
+await UIService.OpenAsync("Game.UI.InventoryView", new InventoryViewArgs(playerId));
+```
+
+需要等待弹窗结果时继续使用强类型的 `ShowAsync`。统一清单的地址、返回键和遮罩行为在清单 Inspector 调整。
+
+在页面向导选择清单并创建页面，再把清单关联到 Startup Config。在清单 Inspector 使用「预览地址变更」或「预览移除登记」确认要修改的直接引用包条目。应用后可用一次 Undo 恢复清单和包，其他页面或常驻资源使用的地址会保留。YooAsset 条目通过收集器维护。使用「校验登记」核对 ID、Prefab、工厂和地址。
 
 ## 页面、弹窗和返回
 
@@ -59,6 +73,14 @@ public sealed partial class InventoryView : UIView<InventoryViewArgs>
 ```
 
 Item 的业务类继承 `UIItem`，复用时调用 `GetComponent<UIDisplay>().GetItem<MyItem>()` 取得一次实例。设置数据后调用 `Rebind()`，通过 Item 的 `Refresh()` 访问同样的强类型控件。回收时禁用 GameObject，框架会暂停 Item 的可见期订阅。
+
+## UI 状态
+
+选中 `UIStateController`，点击 Inspector 的「打开 UIState 工作台」，或使用 `Tools > EasyFramework > UI > State Workbench`。左侧管理状态顺序和运行时初态。右侧支持按路径搜索节点、筛选当前状态的覆盖和多选节点。
+
+1. 多选节点后勾选要控制的字段，点击「纳入控制」。节点当前值作为这些字段的基准。
+2. 选择状态，在节点字段中直接修改覆盖，或在批量编辑区填写值后点「应用覆盖」。点「恢复基准」可清除当前状态所选字段的覆盖。每次批量命令对应一次 Undo。
+3. 点击「打开隔离预览」，在 Scene 视图编辑副本。在工作台选择相应节点和字段，再点「记录预览覆盖」提交变化。直接结束预览会丢弃副本。工作台会提示 UIState 与时间轴共同控制的字段。
 
 ## 独立组件 Node
 
@@ -102,15 +124,52 @@ InventoryList.SetItems(new[]
 
 - **片段**支持在时间轴上拖动位置或拖拽右端调整时长，可从场景捕获起点和终点，也可填数值。
 - **关键帧**按目标与属性建立轨道。移动游标，调整目标后点「在游标处记录关键帧」。也可直接编辑关键帧值、拖动时间，并为每键设置到下一帧的缓动。
+- **事件帧**。把游标移到触发点，点击「游标处添加事件」，在事件轨选中标记后编辑名称和时间。也可拖动标记或删除。事件可放在结束点之后，动画会延长到该事件的时间。
 - **预览**支持拖动标尺、输入时间、播放和暂停。停止、保存、退出工作台或进入 Play Mode 时，工作台恢复预览前的目标属性。
-- **自动开关**在工作台将动画「设为开场」或「设为退场」。自动进退场使用非缩放时间，关闭时等待退场播放完再释放页面。普通动效从生成的控件属性调用 `Timeline.Play("Pulse")`，使用时间轴配置的计时方式。
+- **自动开关**在工作台将动画「设为开场」或「设为退场」。自定义进退场与默认淡入淡出使用同一个时间轴播放器，按非缩放时间推进。关闭时等待退场结束再释放页面。普通动效调用 `Timeline.Play("Pulse")`，使用时间轴配置的计时方式。
 
 同一段动画中，不同属性可以并行。同一目标的同一属性发生片段重叠或关键帧时间重复时，工作台与构建校验会提示目标和时间。示例页面 `WorkbenchDemoView` 的开场同时使用缩放片段和旋转关键帧。
 
+### 共享转场预设
+
+在 Project 窗口通过 `Create > EasyFramework > UI > Transition Preset` 创建预设，将它拖到页面 `UITransition` 的「共享转场预设」。要统一多个页面的转场，把同一资产分配给这些页面。
+
+进场和退场可分别设置时长、缓动、透明度比例与缩放倍率。进场的比例用于起点，退场的比例用于终点。每个页面都按自己的原始透明度和缩放计算端点。时长设为 0 会立即应用终值。关闭某一阶段的缩放后，该阶段只播放透明度。
+
+进场和退场各自按「自定义时间轴 → 共享预设 → 标准淡入淡出」选用配置。UI 工作台和构建校验会检查页面实际使用的预设参数。
+
+### 订阅事件帧
+
+通过 `UITimeline.EventTriggered` 接收 `UITimelineEvent`。它包含动画名 `AnimationName`、事件名 `EventName` 和时间 `Time`。在生成的 View 中，可在 `OnCreated` 订阅并在 `OnDispose` 解除。0 秒事件在启动播放时发出，订阅应在播放前完成。
+
+```csharp
+protected override void OnCreated()
+{
+    if (Timeline != null) Timeline.EventTriggered += OnTimelineEvent;
+}
+
+protected override void OnDispose()
+{
+    if (Timeline != null) Timeline.EventTriggered -= OnTimelineEvent;
+}
+
+private void OnTimelineEvent(UITimelineEvent marker)
+{
+    if (marker.AnimationName == "Open" && marker.EventName == "Reveal")
+        RevealContent();
+}
+```
+
+一帧跨过多个事件时，先按时间派发，同一时间按登记顺序派发。末尾事件先于完成回调。暂停续播保留进度，`Restart()` 从头发出事件。回调停止当前播放或使页面开始关闭时，本次播放停止派发后续事件。
+
+编辑器预览、`Seek()` 和强制 `Complete()` 都静默处理事件帧。调用 `Seek(t)` 后继续播放，只派发时间大于 `t` 的事件。需要再次触发 0 秒事件时，可重播动画。
+
 ## 资源与构建
 
-向导按项目设置生成页面地址，例如 `shop:UI/InventoryView`。将 UI Prefab 放入对应资源包的收集规则，并在启动配置里注册该包。使用 YooAsset 时，在包中启用可寻址地址，确认收集器生成的包内地址与 UIDisplay 一致。演示工程的 `showcase` 包由启动配置显式引用，适用于少量内置资源。分包项目可给不同收集目录设置对应资源包别名。
+从安装向导点「创建页面」，或选中 Startup Config 后使用 `Tools > EasyFramework > UI > Create Display`。创建器会带入页面清单，资源包列表取自该配置。也可以在创建器里直接选择清单和资源包。
 
-工作台「校验」会列出可定位的页面配置和组件问题。构建前会检查失效引用、重复页面类型或地址以及 Prefab 是否已被所配置的包收集。页面内部用 `LoadAssetAsync<T>(address)` 加载的资源归属于界面作用域，关闭时统一归还。
+页面地址由选中包的别名和项目设置的路径前缀组成，例如 `shop:UI/InventoryView`。选中直接引用包时，创建器同时保存页面清单和包条目，包内只登记 `UI/InventoryView` 并指向生成的 Prefab。选中 YooAsset 时，通过收集器将 Prefab 收集为清单对应的包内地址。
+
+工作台「校验」会列出可定位的页面配置和组件问题。构建校验按本次 Player 构建场景所引用的 Startup Config 检查页面清单，包括重复 ID 和地址、Prefab 与工厂绑定、控件引用和资源收集。脚本构建可通过 `BuildPlayerOptions.scenes` 指定场景，页面清单校验与离线预检使用同一份列表。未登记的草稿可独立保存。页面内部用 `LoadAssetAsync<T>(address)` 加载的资源归属于界面作用域，关闭时统一归还。
 
 头像、图标等会替换的图片可以在 `Refresh` 中调用 `SetSpriteAsync(Avatar, address)`。同一控件改图时以最新请求为准，新图到手后归还旧图。隐藏界面会取消待加载请求，并归还已绑定的动态图片。运行时选中 `[UI]`，Inspector 会显示每个页面的租约数及估算大小，共享资源可能在多个页面的估算值中出现。

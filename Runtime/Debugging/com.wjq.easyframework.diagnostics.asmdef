@@ -1,0 +1,12 @@
+{
+    "name": "com.wjq.easyframework.diagnostics",
+    "rootNamespace": "EasyFramework.Debugging",
+    "references": [
+        "com.wjq.easyframework.core",
+        "com.wjq.easyframework.runtime"
+    ],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "UNITY_EDITOR || DEVELOPMENT_BUILD"
+    ]
+}

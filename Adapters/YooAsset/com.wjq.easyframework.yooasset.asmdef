@@ -1,6 +1,6 @@
 {
     "name": "com.wjq.easyframework.yooasset",
-    "references": ["com.wjq.easyframework.runtime", "YooAsset"],
+    "references": ["com.wjq.easyframework.core", "com.wjq.easyframework.runtime", "YooAsset"],
     "defineConstraints": ["EASY_YOOASSET"],
     "versionDefines": [
         {

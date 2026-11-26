@@ -143,10 +143,12 @@ namespace EasyFramework.Editor.UI
                         EditorGUILayout.ObjectField(slot?.Name ?? "失效引用", slot?.Target, typeof(Component), true);
                         using (new EditorGUI.DisabledScope(!editable))
                         {
-                            if (current != null && current.Target != slot.Target)
+                            if (current != null && slot != null && current.Target != slot.Target)
                                 EditorGUILayout.LabelField("保存后更新组件", GUILayout.Width(105f));
-                            else if (current != null && current.Name != slot.Name &&
-                                GUILayout.Button($"预览 → {current.Name}", GUILayout.MinWidth(140f)))
+                            else if (current != null &&
+                                     slot != null &&
+                                     current.Name != slot.Name &&
+                                     GUILayout.Button($"预览 → {current.Name}", GUILayout.MinWidth(140f)))
                                 _rename = UIControlRename.Preview(display, slot, current.Name);
                             if (current == null && GUILayout.Button("移除") &&
                                 EditorUtility.DisplayDialog("移除控件引用", $"移除 {slot?.Name}？请一并删除业务中的使用。", "移除", "取消"))
@@ -209,7 +211,7 @@ namespace EasyFramework.Editor.UI
                 if (group.Skip(1).Any()) continue;
                 var rule = group.First();
                 Type type = rule.ResolveType();
-                if (type == null || !selected.GetComponents(type).Any(component => component != null)) continue;
+                if (type == null || selected.GetComponents(type).All(component => component == null)) continue;
                 string nodeName = rule.Keyword + "_" + name;
                 menu.AddItem(new GUIContent($"{rule.Keyword} · {type.Name}"), selected.name == nodeName, () =>
                 {
@@ -226,6 +228,12 @@ namespace EasyFramework.Editor.UI
 
         private void DrawStates(UIBindingRoot display, GameObject selected)
         {
+            if (UIStatePreview.IsPreviewObject(display.gameObject))
+            {
+                EditorGUILayout.HelpBox("请在 UIState 工作台记录预览画布上的修改。", MessageType.Info);
+                return;
+            }
+
             UIStateController[] controllers = display.GetComponentsInChildren<UIStateController>(true);
             UIStateController selectedController = selected == null
                 ? null : selected.GetComponentInParent<UIStateController>(true);
@@ -240,25 +248,18 @@ namespace EasyFramework.Editor.UI
                     _controller = controller;
             EditorGUILayout.EndHorizontal();
 
-            if (_controller == null && !AssetDatabase.Contains(display.gameObject) &&
+            if (_controller == null && !EditorApplication.isPlayingOrWillChangePlaymode &&
+                !AssetDatabase.Contains(display.gameObject) &&
                 GUILayout.Button("在页面根节点添加 UIStateController"))
                 _controller = Undo.AddComponent<UIStateController>(display.gameObject);
 
             if (_controller == null)
             {
-                EditorGUILayout.HelpBox("打开 Prefab 后，可在页面根节点添加 UIStateController，再切换和记录状态。",
+                EditorGUILayout.HelpBox("在 Prefab Mode 的页面根节点添加 UIStateController 后，可打开状态工作台。",
                     MessageType.Info);
                 return;
             }
-            bool canAddElement = selected != null && !AssetDatabase.Contains(selected) &&
-                selected.GetComponentInParent<UIStateController>(true) == _controller &&
-                selected.GetComponent<UIElement>() == null;
-            using (new EditorGUI.DisabledScope(!canAddElement))
-                if (GUILayout.Button("在选中节点添加 UIElement"))
-                    Undo.AddComponent<UIElement>(selected);
-
             DrawInspector(_controller);
-            if (GUILayout.Button("打开状态矩阵")) UIStateWorkbench.Open(_controller);
         }
 
         private void DrawValidation(UIBindingRoot display)
@@ -267,7 +268,7 @@ namespace EasyFramework.Editor.UI
             EditorGUILayout.LabelField("页面校验", EditorStyles.boldLabel);
             if (GUILayout.Button("重新校验", GUILayout.Width(100f))) _issues = UIValidator.FindIssues(display, validateAddress: true);
             EditorGUILayout.EndHorizontal();
-            if (_issues == null) _issues = UIValidator.FindIssues(display, validateAddress: true);
+            _issues ??= UIValidator.FindIssues(display, validateAddress: true);
             if (_issues.Count == 0)
             {
                 EditorGUILayout.HelpBox("当前页面校验通过。", MessageType.Info);

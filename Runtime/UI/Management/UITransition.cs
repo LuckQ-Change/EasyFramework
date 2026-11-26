@@ -4,15 +4,12 @@ using UnityEngine;
 
 namespace EasyFramework.UI
 {
-    /// <summary>将页面打开和关闭配置转换为 Tween；不承担 Tween 的逐帧调度。</summary>
+    /// <summary>将页面开关、视觉基准和输入恢复接入统一的时间轴播放。</summary>
     [AddComponentMenu("EasyFramework/UI/Transition")]
     [DisallowMultipleComponent]
     public sealed class UITransition : MonoBehaviour
     {
-        [SerializeField, Min(0f)] private float _openDuration = 0.15f;
-        [SerializeField, Min(0f)] private float _closeDuration = 0.12f;
-        [SerializeField] private bool _scale = true;
-        [SerializeField, Range(0.5f, 1f)] private float _startScale = 0.92f;
+        [SerializeField] private UITransitionPreset _preset;
         [SerializeField] private UITimeline _openTimeline;
         [SerializeField] private string _openAnimation;
         [SerializeField] private UITimeline _closeTimeline;
@@ -28,6 +25,8 @@ namespace EasyFramework.UI
         private bool _closing;
         private Action _closeCompletion;
 
+        #region 生命周期
+
         private void OnDisable()
         {
             StopCurrent();
@@ -42,69 +41,93 @@ namespace EasyFramework.UI
             CompleteCloseOnce();
         }
 
+        #endregion
+
+        #region 公共方法
+
+        /// <summary>播放进场动画，结束时还原页面输入设置。</summary>
         public void PlayOpen()
         {
             if (_closing)
                 throw new InvalidOperationException("A closing UI display cannot play its open transition again.");
             CaptureBaseAppearance();
-            bool interrupted = _active != null && _active.IsPlaying;
-            StopCurrent();
-            gameObject.SetActive(true);
+            bool isInterrupted = _active != null && _active.IsPlaying;
+            UITimelinePlayback playback;
             if (_openTimeline != null)
             {
-                UITimelinePlayback playback = _openTimeline.CreatePlayback(_openAnimation);
-                if (_openAppearance == null)
-                {
-                    playback.Capture();
-                    _openAppearance = playback;
-                }
-                _group.blocksRaycasts = false;
-                PlayTween(playback, closing: false);
-                return;
+                playback = _openTimeline.CreatePlayback(_openAnimation);
             }
-            float fromAlpha = interrupted ? _group.alpha : 0f;
-            Vector3 fromScale = interrupted ? transform.localScale : _baseScale * _startScale;
-            _group.blocksRaycasts = false;
+            else
+            {
+                UITransitionMotion motion = GetMotion(isClosing: false);
+                // 首次进场按页面的基准缩放取起点。重复进场从当前采样值接续。
+                float fromAlpha = isInterrupted ? _group.alpha : _baseAlpha * motion.Alpha;
+                Vector3 fromScale = isInterrupted ? transform.localScale : _baseScale * motion.Scale;
+                playback = UITimelinePlayback.CreateTransition(_group, motion.HasScale ? transform : null,
+                    fromAlpha, _baseAlpha, fromScale, _baseScale, motion.Duration, motion.Ease);
+            }
 
-            var sequence = TweenFactory.Sequence();
-            sequence.Append(TweenFactory.To(fromAlpha, _baseAlpha, _openDuration,
-                value => _group.alpha = value).SetEase(TweenEase.OutCubic));
-            if (_scale)
-                sequence.Join(TweenFactory.To(fromScale, _baseScale, _openDuration,
-                    value => transform.localScale = value).SetEase(TweenEase.OutCubic));
-            PlayTween(sequence, closing: false);
+            StopCurrent();
+            gameObject.SetActive(true);
+            if (_openTimeline != null && _openAppearance == null)
+            {
+                playback.Capture();
+                _openAppearance = playback;
+            }
+            _group.blocksRaycasts = false;
+            PlayTween(playback, closing: false);
         }
 
+        /// <summary>播放退场动画，结束时交还页面管理器收尾。</summary>
+        /// <param name="completed">用于完成关闭的回调。</param>
         public void PlayClose(Action completed)
         {
             if (_closing)
                 throw new InvalidOperationException("The UI close transition is already running.");
-            UITimelinePlayback playback = _closeTimeline != null ? _closeTimeline.CreatePlayback(_closeAnimation) : null;
             CaptureBaseAppearance();
+            UITimelinePlayback playback;
+            if (_closeTimeline != null)
+            {
+                playback = _closeTimeline.CreatePlayback(_closeAnimation, isClosingTransition: true);
+            }
+            else
+            {
+                UITransitionMotion motion = GetMotion(isClosing: true);
+                // 从当前视觉状态退场，使进场中途关闭时能连续播放。
+                playback = UITimelinePlayback.CreateTransition(_group, motion.HasScale ? transform : null,
+                    _group.alpha, _baseAlpha * motion.Alpha, transform.localScale, _baseScale * motion.Scale,
+                    motion.Duration, motion.Ease);
+            }
             StopCurrent();
             _group.blocksRaycasts = false;
             _closing = true;
             _closeCompletion = completed;
-            if (playback != null)
-            {
-                PlayTween(playback, closing: true);
-                return;
-            }
+            PlayTween(playback, closing: true);
+        }
 
-            var sequence = TweenFactory.Sequence();
-            sequence.Append(TweenFactory.To(_group.alpha, 0f, _closeDuration,
-                value => _group.alpha = value).SetEase(TweenEase.InCubic));
-            if (_scale)
-                sequence.Join(TweenFactory.To(transform.localScale, _baseScale * _startScale,
-                    _closeDuration, value => transform.localScale = value).SetEase(TweenEase.InCubic));
-            PlayTween(sequence, closing: true);
+        #endregion
+
+        #region 私有逻辑
+
+        private UITransitionMotion GetMotion(bool isClosing)
+        {
+            if (_preset != null) return _preset.GetMotion(isClosing);
+            return UITransitionPreset.DefaultMotion(isClosing);
         }
 
         private void PlayTween(TweenHandle tween, bool closing)
         {
             _active = tween.SetTimeMode(TweenTimeMode.Unscaled).SetOwner(this).OnComplete(Finish).OnKill(Finish);
-            if (Application.isPlaying && TweenModule.Instance != null) tween.Play();
-            else tween.Complete();
+            try
+            {
+                if (Application.isPlaying && TweenModule.Instance != null) tween.Play();
+                else tween.Complete();
+            }
+            catch
+            {
+                tween.Kill();
+                throw;
+            }
 
             void Finish()
             {
@@ -115,10 +138,12 @@ namespace EasyFramework.UI
             }
         }
 
-        internal void ValidateTimelines()
+        internal void ValidateConfiguration()
         {
             Validate(_openTimeline, _openAnimation, "开场");
             Validate(_closeTimeline, _closeAnimation, "退场");
+            if (_preset != null && _openTimeline == null) _preset.GetMotion(isClosing: false);
+            if (_preset != null && _closeTimeline == null) _preset.GetMotion(isClosing: true);
 
             void Validate(UITimeline timeline, string animation, string usage)
             {
@@ -156,5 +181,6 @@ namespace EasyFramework.UI
             completed?.Invoke();
         }
 
+        #endregion
     }
 }

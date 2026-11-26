@@ -5,12 +5,15 @@ using UnityEngine.UI;
 
 namespace EasyFramework
 {
-    /// <summary>启动资源失败时显示的本地重试入口。</summary>
+    /// <summary>显示常驻资源或热更启动失败的本地重试入口。</summary>
     internal sealed class StartupRetryView
     {
         private readonly GameObject _root;
+        private readonly Text _detail;
+        private readonly Button _retryButton;
 
-        internal StartupRetryView(Transform parent, FrameworkStartupConfig config, Action retry)
+        internal StartupRetryView(Transform parent, FrameworkStartupConfig config, Action retry,
+            string title = "启动资源加载失败")
         {
             _root = new GameObject("[Startup Retry]", typeof(RectTransform), typeof(Canvas), typeof(CanvasScaler),
                 typeof(GraphicRaycaster));
@@ -27,22 +30,23 @@ namespace EasyFramework
             var rect = (RectTransform)card.transform;
             rect.SetParent(_root.transform, false);
             rect.anchorMin = rect.anchorMax = new Vector2(0.5f, 0.5f);
-            rect.sizeDelta = new Vector2(500f, 190f);
+            rect.sizeDelta = new Vector2(650f, 330f);
             card.GetComponent<Image>().color = new Color(0.09f, 0.12f, 0.17f, 0.98f);
             Font font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-            AddLabel(rect, font, "启动资源加载失败", 29, new Vector2(0f, 42f), new Vector2(470f, 44f));
+            AddLabel(rect, font, title, 29, new Vector2(0f, 117f), new Vector2(610f, 44f));
+            _detail = AddLabel(rect, font, string.Empty, 20, new Vector2(0f, 8f), new Vector2(600f, 160f));
 
             var button = new GameObject("Retry", typeof(RectTransform), typeof(Image), typeof(Button));
             var buttonRect = (RectTransform)button.transform;
             buttonRect.SetParent(rect, false);
             buttonRect.anchorMin = buttonRect.anchorMax = new Vector2(0.5f, 0.5f);
-            buttonRect.anchoredPosition = new Vector2(0f, -35f);
+            buttonRect.anchoredPosition = new Vector2(0f, -110f);
             buttonRect.sizeDelta = new Vector2(190f, 58f);
             var image = button.GetComponent<Image>();
             image.color = new Color(0.12f, 0.36f, 0.72f);
-            var action = button.GetComponent<Button>();
-            action.targetGraphic = image;
-            action.onClick.AddListener(() => retry());
+            _retryButton = button.GetComponent<Button>();
+            _retryButton.targetGraphic = image;
+            _retryButton.onClick.AddListener(() => retry());
             AddLabel(buttonRect, font, "重试", 27, Vector2.zero, buttonRect.sizeDelta);
 
             if (EventSystem.current == null && UnityEngine.Object.FindObjectOfType<EventSystem>() == null)
@@ -52,14 +56,28 @@ namespace EasyFramework
             }
         }
 
-        internal void Show() => _root.SetActive(true);
+        internal void Show(string detail = null, bool canRetry = true)
+        {
+            _detail.text = detail ?? string.Empty;
+            _retryButton.gameObject.SetActive(canRetry);
+            _root.SetActive(true);
+        }
 
         internal void Hide()
         {
             if (_root != null) _root.SetActive(false);
         }
 
-        private static void AddLabel(RectTransform parent, Font font, string content, int fontSize,
+        internal void Release()
+        {
+            if (_root == null) return;
+            if (_retryButton != null) _retryButton.onClick.RemoveAllListeners();
+            Hide();
+            if (Application.isPlaying) UnityEngine.Object.Destroy(_root);
+            else UnityEngine.Object.DestroyImmediate(_root);
+        }
+
+        private static Text AddLabel(RectTransform parent, Font font, string content, int fontSize,
             Vector2 position, Vector2 size)
         {
             var obj = new GameObject(content, typeof(RectTransform), typeof(Text));
@@ -75,6 +93,7 @@ namespace EasyFramework
             text.alignment = TextAnchor.MiddleCenter;
             text.color = Color.white;
             text.raycastTarget = false;
+            return text;
         }
     }
 }

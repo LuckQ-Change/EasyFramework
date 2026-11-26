@@ -2,8 +2,8 @@
     "name": "com.wjq.easyframework.runtime",
     "rootNamespace": "",
     "references": [
-        "Unity.ugui",
-        "HybridCLR.Runtime"
+        "com.wjq.easyframework.core",
+        "Unity.ugui"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],
@@ -12,12 +12,6 @@
     "precompiledReferences": [],
     "autoReferenced": true,
     "defineConstraints": [],
-    "versionDefines": [
-        {
-            "name": "com.code-philosophy.hybridclr",
-            "expression": "1.0.0",
-            "define": "EASY_HYBRIDCLR"
-        }
-    ],
+    "versionDefines": [],
     "noEngineReferences": false
 }

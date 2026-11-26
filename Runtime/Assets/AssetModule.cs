@@ -299,6 +299,26 @@ namespace EasyFramework
             return new AssetCacheSnapshot(pending, live, leases, _idle.Count, activeBytes, _idleBytes, residents, residentBytes);
         }
 
+        /// <summary>在 Unity 主线程读取已加载资源的活跃租约明细。</summary>
+        /// <param name="destination">由调用方持有的列表。每次采集前清空并复用。</param>
+        /// <param name="limit">最多复制的条目数。传入零时只清空列表。</param>
+        public void CopyActiveLeaseUsage(List<AssetLeaseUsage> destination, int limit)
+        {
+            VerifyThread();
+            if (destination == null) throw new ArgumentNullException(nameof(destination));
+            if (limit < 0) throw new ArgumentOutOfRangeException(nameof(limit));
+
+            destination.Clear();
+            if (limit == 0) return;
+
+            foreach (Entry entry in _entries.Values)
+            {
+                if (entry.Pending || entry.Users == 0) continue;
+                destination.Add(new AssetLeaseUsage(entry.Key, entry.Users, entry.Bytes));
+                if (destination.Count == limit) return;
+            }
+        }
+
         protected override void OnInit()
         {
             _settings ??= AssetCacheSettings.ForCurrentPlatform();
@@ -307,7 +327,7 @@ namespace EasyFramework
             Application.lowMemory += OnLowMemory;
         }
 
-        void IFrameUpdate.Tick(float deltaTime)
+        void IFrameUpdate.Tick(FrameTime frameTime)
         {
             EvictIdle(force: false);
             double now = Time.realtimeSinceStartupAsDouble;
@@ -437,6 +457,8 @@ namespace EasyFramework
 
         private async Task InitializePackageAsync(Package package, TaskCompletionSource<bool> completion)
         {
+            // 资源包可能在任意调用点首次加载，后端工厂与初始化始终读取所属宿主。
+            using var scope = Host.EnterScope();
             bool hasSlot = false;
             try
             {
@@ -611,7 +633,7 @@ namespace EasyFramework
                 ? package
                 : throw new KeyNotFoundException($"Asset package '{alias}' is not registered.");
 
-        private static string NormalizeAlias(string alias)
+        internal static string NormalizeAlias(string alias)
         {
             if (string.IsNullOrWhiteSpace(alias)) throw new ArgumentException("Asset package alias is required.", nameof(alias));
             alias = alias.Trim();
@@ -693,6 +715,26 @@ namespace EasyFramework
             ActiveEstimatedBytes = activeBytes;
             IdleEstimatedBytes = idleBytes;
             ResidentEstimatedBytes = residentBytes;
+        }
+    }
+
+    /// <summary>已加载资源在采集时持有的租约明细。</summary>
+    public readonly struct AssetLeaseUsage
+    {
+        /// <summary>规范化的资源包别名与资源地址。</summary>
+        public string Address { get; }
+
+        /// <summary>当前持有该资源的租约数，包含常驻租约。</summary>
+        public int LeaseCount { get; }
+
+        /// <summary>该资源的估算字节数。</summary>
+        public long EstimatedBytes { get; }
+
+        internal AssetLeaseUsage(string address, int leaseCount, long estimatedBytes)
+        {
+            Address = address;
+            LeaseCount = leaseCount;
+            EstimatedBytes = estimatedBytes;
         }
     }
 }

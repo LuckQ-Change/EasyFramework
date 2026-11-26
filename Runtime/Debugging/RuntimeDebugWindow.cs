@@ -1,609 +1,612 @@
 using System;
 using System.Collections.Generic;
 using System.Text;
+using System.Threading.Tasks;
+using EasyFramework.Debugging;
+using EasyFramework.UI;
 using UnityEngine;
-using UnityEngine.SceneManagement;
-
-[assembly: UnityEngine.Scripting.AlwaysLinkAssembly]
 
 namespace EasyFramework
 {
-    /// <summary>在设备上查看 Unity 与框架日志的轻量调试窗口。</summary>
+    /// <summary>在安全区内展示诊断快照，并在展开时选择需要采样的页面。</summary>
+    [AddComponentMenu("")]
     [DisallowMultipleComponent]
     public sealed class RuntimeDebugWindow : MonoBehaviour
     {
-        private const int Capacity = 500;
-        private const int MaxMessageLength = 4096;
-        private const int MaxStackLength = 16384;
-        private const float RowHeight = 36f;
+        private const int MAX_LOG_CAPACITY = 500;
+        private const int PREVIEW_LENGTH = 240;
+        private const float LOG_ROW_HEIGHT = 24f;
+        private const float PANEL_WIDTH = 682f;
+        private const float PANEL_HEIGHT = 510f;
+        private const float MIN_PANEL_WIDTH = 160f;
+        private const float MIN_PANEL_HEIGHT = 95f;
+        private static readonly string[] _pageLabels = { "日志", "性能", "资源", "UI", "启动" };
+        private static readonly string[] _logLabels = { "信息", "警告", "错误", "异常" };
+        private static readonly RuntimeDebugPage[] _pages =
+            { RuntimeDebugPage.Logs, RuntimeDebugPage.Performance, RuntimeDebugPage.Assets, RuntimeDebugPage.UI, RuntimeDebugPage.Startup };
+        private static readonly IReadOnlyList<RuntimeDebugLogEntry> _emptyLogs = Array.Empty<RuntimeDebugLogEntry>();
 
-        private struct LogEntry
-        {
-            public string Time;
-            public string Message;
-            public string StackTrace;
-            public LogType Type;
-        }
-
-        private static readonly List<LogEntry> EarlyEntries = new List<LogEntry>(Capacity);
-        private readonly List<LogEntry> _entries = new List<LogEntry>(Capacity);
-        private readonly List<int> _visibleIndices = new List<int>(Capacity);
+        private readonly List<LogRow> _visibleLogs = new(MAX_LOG_CAPACITY);
+        private readonly GUIContent _textContent = new();
+        private RuntimeDebugModule _module;
+        private GUI.WindowFunction _drawBadge;
+        private GUI.WindowFunction _drawPanel;
+        private GUIStyle _logStyle;
+        private GUIStyle _detailStyle;
+        private GUISkin _skin;
+        private Rect _windowRect;
+        private Vector2 _badgePosition = new(12f, 12f);
+        private Vector2 _panelPosition = new(12f, 12f);
+        private int _windowId;
+        private bool _isOpen;
+        private int _pageIndex;
+        private int _displayedFps = int.MinValue;
+        private string _fpsLabel;
+        private Vector2 _pageScroll;
         private Vector2 _logScroll;
         private Vector2 _detailScroll;
         private string _search = string.Empty;
-        private string _appliedSearch = string.Empty;
-        private int _selectedIndex = -1;
         private int _levelMask = 15;
-        private int _infoCount;
-        private int _warningCount;
-        private int _errorCount;
-        private int _fatalCount;
-        private bool _dirty = true;
-        private bool _isOpen;
-        private bool _lockScroll = true;
-        private int _group;
-        private readonly int[] _subPages = new int[4];
-        private Rect _iconRect = new Rect(10f, 10f, 120f, 78f);
-        private Rect _windowRect = new Rect(10f, 10f, 680f, 520f);
-        private float _windowScale = 1f;
-        private Vector2 _pageScroll;
-        private float _smoothedDeltaTime;
-        private GUIStyle _rowStyle;
-        private GUIStyle _detailStyle;
+        private bool _isFilterDirty = true;
+        private bool _isFollowing = true;
+        private bool _isLogScrollEndRequested;
+        private bool _isLogPaused;
+        private bool _hasSelectedLog;
+        private long _selectedSequence;
+        private string _logDetail = string.Empty;
+        private IReadOnlyList<RuntimeDebugLogEntry> _displayedLogs = _emptyLogs;
+        private IReadOnlyList<RuntimeDebugLogEntry> _pausedLogs = _emptyLogs;
+        private RuntimeDebugSnapshot _textSnapshot;
+        private string _pageText;
+        private string _measuredText;
+        private float _measuredWidth;
+        private float _measuredHeight;
 
-        public static RuntimeDebugWindow Instance { get; private set; }
-        public bool IsOpen => _isOpen;
-
-        public void Open() => _isOpen = true;
-        public void Close() => _isOpen = false;
-
-        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
-        private static void CaptureStartupLogs()
+        /// <summary>缓存一次可见日志在列表中的显示内容。</summary>
+        private readonly struct LogRow
         {
-            Application.logMessageReceived -= OnEarlyLogMessage;
-            EarlyEntries.Clear();
-            Application.logMessageReceived += OnEarlyLogMessage;
-        }
+            internal RuntimeDebugLogEntry Entry { get; }
+            internal string Label { get; }
 
-        private static void OnEarlyLogMessage(string message, string stackTrace, LogType type)
-        {
-            if (EarlyEntries.Count == Capacity) EarlyEntries.RemoveAt(0);
-            EarlyEntries.Add(CreateEntry(message, stackTrace, type));
-        }
-
-        private static void StopStartupCapture()
-        {
-            Application.logMessageReceived -= OnEarlyLogMessage;
-            EarlyEntries.Clear();
-        }
-
-        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
-        private static void EnsureForProjectsWithoutLauncher()
-        {
-            if (Instance != null || FrameworkLauncher.Instance != null)
+            internal LogRow(RuntimeDebugLogEntry entry, string label)
             {
-                StopStartupCapture();
-                return;
+                Entry = entry;
+                Label = label;
             }
-            FrameworkStartupConfig config = FrameworkStartupConfig.Resolve(null);
-            if (!config.ShowDebugWindow)
-            {
-                StopStartupCapture();
-                return;
-            }
-
-            var host = new GameObject("[EasyFramework Debug]");
-            DontDestroyOnLoad(host);
-            host.AddComponent<RuntimeDebugWindow>();
         }
 
-        private void OnEnable()
+        #region 生命周期
+
+        private void Awake()
         {
-            if (Instance != null && Instance != this)
-            {
-                Destroy(this);
-                return;
-            }
-            Instance = this;
-            Application.logMessageReceived -= OnEarlyLogMessage;
-            for (int i = 0; i < EarlyEntries.Count; i++) AddEntry(EarlyEntries[i]);
-            EarlyEntries.Clear();
-            Application.logMessageReceived += OnLogMessage;
+            _windowId = GetInstanceID();
+            _drawBadge = DrawBadge;
+            _drawPanel = DrawPanel;
         }
+
+        private void OnEnable() => UpdateVisiblePage();
 
         private void OnDisable()
         {
-            Application.logMessageReceived -= OnLogMessage;
-            if (Instance == this) Instance = null;
-        }
-
-        private void Update()
-        {
-            float delta = Time.unscaledDeltaTime;
-            if (delta > 0f)
-                _smoothedDeltaTime = _smoothedDeltaTime <= 0f
-                    ? delta
-                    : Mathf.Lerp(_smoothedDeltaTime, delta, 0.1f);
-        }
-
-        private void OnLogMessage(string message, string stackTrace, LogType type)
-        {
-            AddEntry(CreateEntry(message, stackTrace, type));
-        }
-
-        private static LogEntry CreateEntry(string message, string stackTrace, LogType type)
-        {
-            return new LogEntry
-            {
-                Time = DateTime.Now.ToString("HH:mm:ss"),
-                Message = Limit(message, MaxMessageLength),
-                StackTrace = Limit(stackTrace, MaxStackLength),
-                Type = type,
-            };
-        }
-
-        private void AddEntry(LogEntry entry)
-        {
-            if (_entries.Count == Capacity)
-            {
-                Count(_entries[0].Type, -1);
-                _entries.RemoveAt(0);
-                if (_selectedIndex >= 0) _selectedIndex--;
-            }
-
-            _entries.Add(entry);
-            Count(entry.Type, 1);
-            _dirty = true;
-            if (_lockScroll) _logScroll.y = float.MaxValue;
-        }
-
-        private static string Limit(string value, int length)
-        {
-            if (string.IsNullOrEmpty(value)) return string.Empty;
-            return value.Length <= length ? value : value.Substring(0, length) + "…";
-        }
-
-        private void Count(LogType type, int delta)
-        {
-            switch (Category(type))
-            {
-                case 1: _infoCount += delta; break;
-                case 2: _warningCount += delta; break;
-                case 4: _errorCount += delta; break;
-                case 8: _fatalCount += delta; break;
-            }
-        }
-
-        private static int Category(LogType type)
-        {
-            if (type == LogType.Warning) return 2;
-            if (type == LogType.Exception) return 8;
-            if (type == LogType.Error || type == LogType.Assert) return 4;
-            return 1;
+            if (_module != null) _module.SetVisiblePage(RuntimeDebugPage.None);
         }
 
         private void OnGUI()
         {
-            GUI.depth = -10000;
-            float scale = Mathf.Max(1f, Mathf.Min(Screen.width / 720f, Screen.height / 720f)) * _windowScale;
-            Matrix4x4 originalMatrix = GUI.matrix;
-            GUI.matrix = Matrix4x4.Scale(new Vector3(scale, scale, 1f));
+            if (_module == null) return;
+
+            Rect safe = Screen.safeArea;
+            if (safe.width <= 0f || safe.height <= 0f)
+            {
+                _module.SetVisiblePage(RuntimeDebugPage.None);
+                return;
+            }
+
+            // Unity 安全区以屏幕左下角计量，OnGUI 则以左上角为原点。
+            float scale = Mathf.Clamp(Mathf.Min(safe.width, safe.height) / 680f, 0.7f, 2f);
+            Rect bounds = new(safe.xMin / scale, (Screen.height - safe.yMax) / scale,
+                safe.width / scale, safe.height / scale);
+            Matrix4x4 matrix = GUI.matrix;
+            int depth = GUI.depth;
+            Color color = GUI.color;
+            Color background = GUI.backgroundColor;
+            Color content = GUI.contentColor;
             try
             {
-                Rect safe = Screen.safeArea;
-                Rect bounds = new Rect(safe.xMin / scale,
-                    (Screen.height - safe.yMax) / scale,
-                    safe.width / scale, safe.height / scale);
-                if (!_isOpen)
+                GUI.matrix = Matrix4x4.Scale(new Vector3(scale, scale, 1f));
+                GUI.depth = -10000;
+                GUI.color = GUI.backgroundColor = GUI.contentColor = Color.white;
+                HandleShortcut();
+                if (_isOpen)
                 {
-                    _iconRect = ClampWindow(_iconRect, bounds, 120f, 78f);
-                    _iconRect = GUI.Window(41001, _iconRect, DrawIcon, "DEBUGGER");
+                    _windowRect = Constrain(bounds, _panelPosition, PANEL_WIDTH, PANEL_HEIGHT);
+                    UpdateVisiblePage();
+                    Rect dragged = GUI.Window(_windowId, _windowRect, _drawPanel, "EasyFramework 诊断");
+                    _panelPosition = Constrain(bounds, dragged.position, PANEL_WIDTH, PANEL_HEIGHT).position;
                 }
                 else
                 {
-                    _windowRect = ClampWindow(_windowRect, bounds,
-                        Mathf.Min(320f, bounds.width - 16f),
-                        Mathf.Min(320f, bounds.height - 16f));
-                    _windowRect = GUI.Window(41002, _windowRect, DrawWindow,
-                        "EASY FRAMEWORK DEBUGGER");
+                    _windowRect = Constrain(bounds, _badgePosition, 116f, 60f);
+                    Rect dragged = GUI.Window(_windowId, _windowRect, _drawBadge, "诊断");
+                    _badgePosition = Constrain(bounds, dragged.position, 116f, 60f).position;
                 }
             }
             finally
             {
-                GUI.matrix = originalMatrix;
+                GUI.matrix = matrix;
+                GUI.depth = depth;
+                GUI.color = color;
+                GUI.backgroundColor = background;
+                GUI.contentColor = content;
             }
         }
 
-        private static Rect ClampWindow(Rect rect, Rect bounds, float minimumWidth, float minimumHeight)
+        #endregion
+
+        #region 公共方法
+
+        /// <summary>是否正在显示诊断详情。</summary>
+        public bool IsOpen => _isOpen;
+
+        /// <summary>展开诊断窗口。</summary>
+        public void Open() => SetOpen(true);
+
+        /// <summary>收起详情并停止页面采样。</summary>
+        public void Close() => SetOpen(false);
+
+        internal void Initialize(RuntimeDebugModule module)
         {
-            float maxWidth = Mathf.Max(1f, bounds.width - 16f);
-            float maxHeight = Mathf.Max(1f, bounds.height - 16f);
-            rect.width = Mathf.Clamp(rect.width, Mathf.Min(minimumWidth, maxWidth), maxWidth);
-            rect.height = Mathf.Clamp(rect.height, Mathf.Min(minimumHeight, maxHeight), maxHeight);
-            rect.x = Mathf.Clamp(rect.x, bounds.xMin + 8f, bounds.xMax - rect.width - 8f);
-            rect.y = Mathf.Clamp(rect.y, bounds.yMin + 8f, bounds.yMax - rect.height - 8f);
-            return rect;
+            if (_module != null && _module != module) _module.SetVisiblePage(RuntimeDebugPage.None);
+            _module = module;
+            UpdateVisiblePage();
         }
 
-        private void DrawIcon(int windowId)
+        #endregion
+
+        #region 私有逻辑
+
+        private void HandleShortcut()
         {
-            Color previous = GUI.color;
-            if (_fatalCount > 0) GUI.color = new Color(0.95f, 0.35f, 0.35f);
-            else if (_errorCount > 0) GUI.color = new Color(1f, 0.55f, 0.55f);
-            else if (_warningCount > 0) GUI.color = new Color(1f, 0.85f, 0.45f);
-            if (GUI.Button(new Rect(8f, 27f, _iconRect.width - 16f, 42f),
-                    $"FPS: {FramesPerSecond:0.0}")) Open();
-            GUI.color = previous;
-            GUI.DragWindow(new Rect(0f, 0f, _iconRect.width, 25f));
+            Event input = Event.current;
+            if (input.type != EventType.KeyDown || input.keyCode != KeyCode.F8) return;
+            SetOpen(!_isOpen);
+            input.Use();
         }
 
-        private void DrawWindow(int windowId)
+        private void SetOpen(bool isOpen)
         {
-            float width = _windowRect.width - 16f;
-            int selected = GUI.Toolbar(new Rect(8f, 30f, width, 36f), _group,
-                new[] { "Console", "Information", "Profiler", "Other", "Close" });
-            if (selected == 4)
+            if (_isOpen == isOpen) return;
+            _isOpen = isOpen;
+            UpdateVisiblePage();
+        }
+
+        private void UpdateVisiblePage()
+        {
+            if (_module == null) return;
+            bool isPageVisible = _isOpen && isActiveAndEnabled &&
+                                 _windowRect.width >= MIN_PANEL_WIDTH && _windowRect.height >= MIN_PANEL_HEIGHT;
+            _module.SetVisiblePage(isPageVisible ? _pages[_pageIndex] : RuntimeDebugPage.None);
+        }
+
+        private static Rect Constrain(Rect bounds, Vector2 position, float width, float height)
+        {
+            float edge = Mathf.Min(8f, Mathf.Min(bounds.width, bounds.height) * 0.1f);
+            width = Mathf.Min(width, bounds.width - edge * 2f);
+            height = Mathf.Min(height, bounds.height - edge * 2f);
+            return new Rect(
+                Mathf.Clamp(position.x, bounds.xMin + edge, bounds.xMax - edge - width),
+                Mathf.Clamp(position.y, bounds.yMin + edge, bounds.yMax - edge - height),
+                width, height);
+        }
+
+        private void DrawBadge(int windowId)
+        {
+            int fps = Mathf.RoundToInt(_module.FramesPerSecond);
+            if (_displayedFps != fps)
+            {
+                _displayedFps = fps;
+                _fpsLabel = fps > 0 ? $"FPS {fps}" : "FPS —";
+            }
+
+            if (_windowRect.width > 12f && _windowRect.height > 29f &&
+                GUI.Button(new Rect(6f, 23f, _windowRect.width - 12f, _windowRect.height - 29f), _fpsLabel)) Open();
+            GUI.DragWindow(new Rect(0f, 0f, _windowRect.width, 22f));
+        }
+
+        private void DrawPanel(int windowId)
+        {
+            float width = _windowRect.width;
+            float height = _windowRect.height;
+            if (GUI.Button(new Rect(width - 62f, 3f, 55f, 20f), "收起"))
             {
                 Close();
                 return;
             }
-            if (selected != _group) _pageScroll = Vector2.zero;
-            _group = selected;
 
-            float top = 72f;
-            if (_group != 0)
+            GUI.DragWindow(new Rect(0f, 0f, width - 66f, 22f));
+            if (height < MIN_PANEL_HEIGHT || width < MIN_PANEL_WIDTH) return;
+            EnsureStyles();
+
+            int current = GUI.Toolbar(new Rect(8f, 25f, width - 16f, 27f), _pageIndex, _pageLabels);
+            if (current != _pageIndex)
             {
-                string[] pages = _group == 1
-                    ? new[] { "System", "Environment", "Screen", "Graphics" }
-                    : _group == 2
-                        ? new[] { "Summary", "Memory", "Scene" }
-                        : new[] { "Settings", "Operations" };
-                int page = GUI.Toolbar(new Rect(8f, top, width, 34f),
-                    _subPages[_group], pages);
-                if (page != _subPages[_group]) _pageScroll = Vector2.zero;
-                _subPages[_group] = page;
-                top += 40f;
+                _pageIndex = current;
+                _pageScroll = Vector2.zero;
+                UpdateVisiblePage();
             }
 
-            Rect content = new Rect(8f, top, width, Mathf.Max(0f, _windowRect.height - top - 8f));
-            switch (_group)
+            var area = new Rect(8f, 58f, width - 16f, height - 66f);
+            RuntimeDebugSnapshot snapshot = _module.Snapshot;
+            if (_pages[_pageIndex] == RuntimeDebugPage.Logs)
             {
-                case 0: DrawConsole(content); break;
-                case 1: DrawInformation(content, _subPages[1]); break;
-                case 2: DrawProfiler(content, _subPages[2]); break;
-                case 3: DrawOther(content, _subPages[3]); break;
-            }
-            GUI.DragWindow(new Rect(0f, 0f, _windowRect.width, 26f));
-        }
-
-        private float FramesPerSecond => _smoothedDeltaTime > 0f ? 1f / _smoothedDeltaTime : 0f;
-
-        private void DrawConsole(Rect area)
-        {
-            if (GUI.Button(new Rect(area.x, area.y, 82f, 34f), "Clear All")) Clear();
-            _lockScroll = GUI.Toggle(new Rect(area.x + 88f, area.y, 110f, 34f),
-                _lockScroll, "Lock Scroll");
-            if (GUI.Button(new Rect(area.x + 204f, area.y, 85f, 34f), "Copy All")) CopyAll();
-
-            float filterWidth = (area.width - 12f) / 4f;
-            DrawFilter(new Rect(area.x, area.y + 40f, filterWidth, 34f), 1, $"Info ({_infoCount})");
-            DrawFilter(new Rect(area.x + filterWidth + 4f, area.y + 40f, filterWidth, 34f), 2,
-                $"Warning ({_warningCount})");
-            DrawFilter(new Rect(area.x + (filterWidth + 4f) * 2f, area.y + 40f, filterWidth, 34f), 4,
-                $"Error ({_errorCount})");
-            DrawFilter(new Rect(area.x + (filterWidth + 4f) * 3f, area.y + 40f, filterWidth, 34f), 8,
-                $"Fatal ({_fatalCount})");
-
-            GUI.Label(new Rect(area.x, area.y + 82f, 58f, 30f), "Search");
-            _search = GUI.TextField(new Rect(area.x + 58f, area.y + 78f, area.width - 58f, 34f),
-                _search ?? string.Empty);
-            if (_dirty || !string.Equals(_search, _appliedSearch, StringComparison.Ordinal))
-                RebuildVisibleIndices();
-
-            float listHeight = Mathf.Max(50f, (area.height - 122f) * 0.52f);
-            Rect listRect = new Rect(area.x, area.y + 118f, area.width, listHeight);
-            DrawLogList(listRect);
-
-            float detailY = listRect.yMax + 6f;
-            Rect detailRect = new Rect(area.x, detailY, area.width, Mathf.Max(0f, area.yMax - detailY));
-            DrawDetail(detailRect);
-        }
-
-        private void DrawFilter(Rect rect, int bit, string label)
-        {
-            bool enabled = (_levelMask & bit) != 0;
-            Color previous = GUI.color;
-            if (!enabled) GUI.color = new Color(0.6f, 0.6f, 0.6f, 1f);
-            if (GUI.Button(rect, label))
-            {
-                _levelMask ^= bit;
-                _dirty = true;
-            }
-            GUI.color = previous;
-        }
-
-        private void RebuildVisibleIndices()
-        {
-            _visibleIndices.Clear();
-            for (int i = 0; i < _entries.Count; i++)
-            {
-                LogEntry entry = _entries[i];
-                if ((_levelMask & Category(entry.Type)) == 0) continue;
-                if (!string.IsNullOrEmpty(_search) &&
-                    entry.Message.IndexOf(_search, StringComparison.OrdinalIgnoreCase) < 0 &&
-                    entry.StackTrace.IndexOf(_search, StringComparison.OrdinalIgnoreCase) < 0)
-                    continue;
-                _visibleIndices.Add(i);
-            }
-            _appliedSearch = _search;
-            _dirty = false;
-        }
-
-        private void DrawLogList(Rect rect)
-        {
-            GUI.Box(rect, GUIContent.none);
-            float viewWidth = Mathf.Max(1f, rect.width - 20f);
-            float viewHeight = Mathf.Max(rect.height, _visibleIndices.Count * RowHeight);
-            _logScroll = GUI.BeginScrollView(rect, _logScroll,
-                new Rect(0f, 0f, viewWidth, viewHeight));
-            int first = Mathf.Max(0, Mathf.FloorToInt(_logScroll.y / RowHeight));
-            int last = Mathf.Min(_visibleIndices.Count,
-                Mathf.CeilToInt((_logScroll.y + rect.height) / RowHeight) + 1);
-            for (int row = first; row < last; row++)
-            {
-                int index = _visibleIndices[row];
-                LogEntry entry = _entries[index];
-                Rect rowRect = new Rect(2f, row * RowHeight, viewWidth - 4f, RowHeight - 2f);
-                Color previous = GUI.color;
-                if (index == _selectedIndex) GUI.color = new Color(0.65f, 0.85f, 1f);
-                else if (Category(entry.Type) == 8) GUI.color = new Color(0.95f, 0.45f, 0.45f);
-                else if (Category(entry.Type) == 4) GUI.color = new Color(1f, 0.65f, 0.65f);
-                else if (Category(entry.Type) == 2) GUI.color = new Color(1f, 0.85f, 0.55f);
-                string line = entry.Message.Replace('\n', ' ').Replace('\r', ' ');
-                if (GUI.Button(rowRect, $"{entry.Time}  {line}", RowStyle))
-                {
-                    _selectedIndex = index;
-                    _detailScroll = Vector2.zero;
-                }
-                GUI.color = previous;
-            }
-            GUI.EndScrollView();
-        }
-
-        private void DrawDetail(Rect rect)
-        {
-            GUI.Box(rect, GUIContent.none);
-            if (_selectedIndex < 0 || _selectedIndex >= _entries.Count)
-            {
-                GUI.Label(new Rect(rect.x + 8f, rect.y + 4f, rect.width - 16f, 28f),
-                    "Tap a log to view details and stack trace.");
+                DrawLogs(area, snapshot.Page == RuntimeDebugPage.Logs ? snapshot.Logs : _displayedLogs);
                 return;
             }
 
-            LogEntry entry = _entries[_selectedIndex];
-            if (GUI.Button(new Rect(rect.xMax - 72f, rect.y + 4f, 64f, 32f), "Copy"))
-                GUIUtility.systemCopyBuffer = entry.Message + "\n" + entry.StackTrace;
-            string detail = entry.Time + "  " + entry.Type + "\n" + entry.Message +
-                (string.IsNullOrEmpty(entry.StackTrace) ? string.Empty : "\n\n" + entry.StackTrace);
-            Rect body = new Rect(rect.x + 6f, rect.y + 38f, rect.width - 12f,
-                Mathf.Max(0f, rect.height - 44f));
-            float textWidth = Mathf.Max(1f, body.width - 20f);
-            float textHeight = Mathf.Max(body.height, DetailStyle.CalcHeight(new GUIContent(detail), textWidth) + 8f);
-            _detailScroll = GUI.BeginScrollView(body, _detailScroll,
-                new Rect(0f, 0f, textWidth, textHeight));
-            GUI.Label(new Rect(4f, 4f, textWidth - 8f, textHeight - 8f), detail, DetailStyle);
-            GUI.EndScrollView();
-        }
-
-        private void DrawInformation(Rect area, int page)
-        {
-            string info;
-            switch (page)
+            if (!ReferenceEquals(snapshot, _textSnapshot))
             {
-                case 1:
-                    info = "ENVIRONMENT\n\n" +
-                        $"Platform: {Application.platform}\n" +
-                        $"Product: {Application.productName}\n" +
-                        $"Company: {Application.companyName}\n" +
-                        $"Identifier: {Application.identifier}\n" +
-                        $"Version: {Application.version}\n" +
-                        $"Data Path: {Application.dataPath}\n" +
-                        $"Persistent Path: {Application.persistentDataPath}\n" +
-                        $"Temporary Path: {Application.temporaryCachePath}\n" +
-                        $"Runtime Mode: {Runtime.Mode}";
-                    break;
-                case 2:
-                    Rect safe = Screen.safeArea;
-                    info = "SCREEN\n\n" +
-                        $"Size: {Screen.width} × {Screen.height}\n" +
-                        $"DPI: {Screen.dpi:0.0}\n" +
-                        $"Orientation: {Screen.orientation}\n" +
-                        $"Safe Area: {safe.x:0}, {safe.y:0}, {safe.width:0}, {safe.height:0}\n" +
-                        $"Fullscreen: {Screen.fullScreen}\n" +
-                        $"Display Resolution: {Screen.currentResolution}";
-                    break;
-                case 3:
-                    info = "GRAPHICS\n\n" +
-                        $"Device: {SystemInfo.graphicsDeviceName}\n" +
-                        $"Type: {SystemInfo.graphicsDeviceType}\n" +
-                        $"Version: {SystemInfo.graphicsDeviceVersion}\n" +
-                        $"Memory: {SystemInfo.graphicsMemorySize} MB\n" +
-                        $"Shader Level: {SystemInfo.graphicsShaderLevel}\n" +
-                        $"Max Texture Size: {SystemInfo.maxTextureSize}\n" +
-                        $"Instancing: {SystemInfo.supportsInstancing}\n" +
-                        $"Compute Shaders: {SystemInfo.supportsComputeShaders}";
-                    break;
-                default:
-                    info = "SYSTEM\n\n" +
-                        $"Device: {SystemInfo.deviceName}\n" +
-                        $"Model: {SystemInfo.deviceModel}\n" +
-                        $"OS: {SystemInfo.operatingSystem}\n" +
-                        $"Processor: {SystemInfo.processorType}\n" +
-                        $"Cores: {SystemInfo.processorCount}\n" +
-                        $"System Memory: {SystemInfo.systemMemorySize} MB\n" +
-                        $"Unity: {Application.unityVersion}\n" +
-                        $"Development Build: {Debug.isDebugBuild}";
-                    break;
+                _textSnapshot = snapshot;
+                _pageText = BuildPageText(snapshot);
             }
-            DrawTextPage(area, info);
+
+            string text = snapshot.Page == _pages[_pageIndex] ? _pageText : "等待页面快照";
+            DrawText(area, text, ref _pageScroll);
         }
 
-        private void DrawProfiler(Rect area, int page)
+        private void DrawLogs(Rect area, IReadOnlyList<RuntimeDebugLogEntry> liveLogs)
         {
-            string info;
-            switch (page)
+            if (area.height < 108f || area.width < 260f)
             {
-                case 1:
-                    info = "MEMORY\n\n" +
-                        $"Managed Heap Used: {FormatBytes(GC.GetTotalMemory(false))}\n" +
-                        $"System Memory: {SystemInfo.systemMemorySize} MB\n" +
-                        $"Graphics Memory: {SystemInfo.graphicsMemorySize} MB\n" +
-                        $"Buffered Logs: {_entries.Count} / {Capacity}";
-                    break;
-                case 2:
-                    var scenes = new StringBuilder("SCENE\n\n");
-                    Scene active = SceneManager.GetActiveScene();
-                    scenes.Append("Active: ").Append(active.name).Append('\n');
-                    scenes.Append("Loaded Scenes: ").Append(SceneManager.sceneCount).Append("\n\n");
-                    for (int i = 0; i < SceneManager.sceneCount; i++)
+                GUI.Label(area, "扩大 Game 视图以查看日志。");
+                return;
+            }
+
+            if (!DrawLogControls(area, liveLogs)) return;
+            IReadOnlyList<RuntimeDebugLogEntry> source = _isLogPaused ? _pausedLogs : liveLogs;
+            RefreshVisibleLogs(source);
+            float listHeight = Mathf.Max(34f, (area.height - 60f) * 0.56f);
+            Rect list = new(area.x, area.y + 60f, area.width, listHeight);
+            DrawLogList(list);
+            float detailTop = list.yMax + 5f;
+            Rect detail = new(area.x, detailTop, area.width, Mathf.Max(0f, area.yMax - detailTop));
+            DrawLogDetail(detail);
+        }
+
+        private bool DrawLogControls(Rect area, IReadOnlyList<RuntimeDebugLogEntry> liveLogs)
+        {
+            const float BUTTON_WIDTH = 52f;
+            const float ROW = 23f;
+            const float SEARCH_LABEL_WIDTH = 38f;
+            float buttonsX = area.xMax - BUTTON_WIDTH * 3f - 8f;
+            GUI.Label(new Rect(area.x, area.y, SEARCH_LABEL_WIDTH, ROW), "搜索");
+            float searchX = area.x + SEARCH_LABEL_WIDTH;
+            string search = GUI.TextField(new Rect(searchX, area.y, buttonsX - searchX - 4f, ROW), _search);
+            if (_search != search)
+            {
+                _search = search;
+                _isFilterDirty = true;
+            }
+
+            if (GUI.Button(new Rect(buttonsX, area.y, BUTTON_WIDTH, ROW), _isLogPaused ? "继续" : "暂停"))
+            {
+                _isLogPaused = !_isLogPaused;
+                _pausedLogs = _isLogPaused ? liveLogs : _emptyLogs;
+                _isFilterDirty = true;
+            }
+            if (GUI.Button(new Rect(buttonsX + BUTTON_WIDTH + 4f, area.y, BUTTON_WIDTH, ROW), _isFollowing ? "跟随中" : "跟随"))
+            {
+                _isFollowing = !_isFollowing;
+                _isLogScrollEndRequested = _isFollowing;
+            }
+            if (GUI.Button(new Rect(buttonsX + (BUTTON_WIDTH + 4f) * 2f, area.y, BUTTON_WIDTH, ROW), "清空"))
+            {
+                _module.ClearLogs();
+                _displayedLogs = _pausedLogs = _emptyLogs;
+                _hasSelectedLog = false;
+                _logDetail = string.Empty;
+                _logScroll = _detailScroll = Vector2.zero;
+                _isLogScrollEndRequested = false;
+                _isFilterDirty = true;
+                // 这次事件收到的是清空前的快照，下一次绘制再读取。
+                return false;
+            }
+
+            float toggleWidth = area.width / _logLabels.Length;
+            for (int i = 0; i < _logLabels.Length; i++)
+            {
+                int bit = 1 << i;
+                bool isShown = (_levelMask & bit) != 0;
+                bool isSelected = GUI.Toggle(new Rect(area.x + toggleWidth * i, area.y + 27f, toggleWidth, ROW),
+                    isShown, _logLabels[i]);
+                if (isShown == isSelected) continue;
+                _levelMask ^= bit;
+                _isFilterDirty = true;
+            }
+            return true;
+        }
+
+        private void RefreshVisibleLogs(IReadOnlyList<RuntimeDebugLogEntry> source)
+        {
+            if (!_isFilterDirty && ReferenceEquals(_displayedLogs, source)) return;
+            _isFilterDirty = false;
+            _displayedLogs = source;
+            _visibleLogs.Clear();
+            for (int i = 0; i < source.Count; i++)
+            {
+                RuntimeDebugLogEntry entry = source[i];
+                int level = LogLevel(entry.Type);
+                if ((_levelMask & (1 << level)) == 0) continue;
+                if (_search.Length > 0 &&
+                    entry.Message.IndexOf(_search, StringComparison.OrdinalIgnoreCase) < 0 &&
+                    entry.StackTrace.IndexOf(_search, StringComparison.OrdinalIgnoreCase) < 0) continue;
+
+                string message = GetPreview(entry.Message);
+                string label = $"{entry.TimestampUtc.ToLocalTime():HH:mm:ss.fff}  [{_logLabels[level]}]  {message}";
+                _visibleLogs.Add(new LogRow(entry, label));
+            }
+            _isLogScrollEndRequested = _isFollowing;
+        }
+
+        private void DrawLogList(Rect area)
+        {
+            float contentWidth = Mathf.Max(1f, area.width - 20f);
+            float contentHeight = Mathf.Max(area.height, _visibleLogs.Count * LOG_ROW_HEIGHT);
+            Event input = Event.current;
+            if (input.type == EventType.ScrollWheel && area.Contains(input.mousePosition))
+            {
+                _isFollowing = false;
+                _isLogScrollEndRequested = false;
+            }
+            if (_isLogScrollEndRequested)
+            {
+                _logScroll.y = contentHeight - area.height;
+                _isLogScrollEndRequested = false;
+            }
+            _logScroll = GUI.BeginScrollView(area, _logScroll, new Rect(0f, 0f, contentWidth, contentHeight));
+            try
+            {
+                if (_visibleLogs.Count == 0)
+                {
+                    GUI.Label(new Rect(5f, 1f, contentWidth - 8f, LOG_ROW_HEIGHT), "没有符合筛选条件的日志");
+                    return;
+                }
+
+                // 渲染滚动区域内的行，避免密集日志在每次 IMGUI 事件时分配控件。
+                int begin = Mathf.Clamp(Mathf.FloorToInt(_logScroll.y / LOG_ROW_HEIGHT), 0, _visibleLogs.Count);
+                int end = Mathf.Min(_visibleLogs.Count, begin + Mathf.CeilToInt(area.height / LOG_ROW_HEIGHT) + 1);
+                for (int index = begin; index < end; index++)
+                {
+                    LogRow row = _visibleLogs[index];
+                    bool isSelected = _hasSelectedLog && _selectedSequence == row.Entry.Sequence;
+                    if (GUI.Toggle(new Rect(0f, index * LOG_ROW_HEIGHT, contentWidth, LOG_ROW_HEIGHT),
+                            isSelected, row.Label, _logStyle) && !isSelected)
                     {
-                        Scene scene = SceneManager.GetSceneAt(i);
-                        scenes.Append(i + 1).Append(". ").Append(scene.name)
-                            .Append(" (build index ").Append(scene.buildIndex).Append(")\n");
+                        _hasSelectedLog = true;
+                        _selectedSequence = row.Entry.Sequence;
+                        _logDetail = string.IsNullOrEmpty(row.Entry.StackTrace)
+                            ? row.Entry.Message
+                            : row.Entry.Message + "\n\n" + row.Entry.StackTrace;
+                        _detailScroll = Vector2.zero;
                     }
-                    info = scenes.ToString();
-                    break;
-                default:
-                    float frameMs = _smoothedDeltaTime * 1000f;
-                    info = "PROFILER SUMMARY\n\n" +
-                        $"FPS: {FramesPerSecond:0.0}\n" +
-                        $"Frame Time: {frameMs:0.0} ms\n" +
-                        $"Frame Count: {Time.frameCount}\n" +
-                        $"Time Scale: {Time.timeScale:0.00}\n" +
-                        $"Target FPS: {Application.targetFrameRate}\n" +
-                        $"VSync Count: {QualitySettings.vSyncCount}\n" +
-                        $"Quality: {QualitySettings.names[QualitySettings.GetQualityLevel()]}";
-                    break;
+                }
             }
-            DrawTextPage(area, info);
+            finally { GUI.EndScrollView(); }
+        }
+
+        private void DrawLogDetail(Rect area)
+        {
+            if (area.height < 27f) return;
+            if (!_hasSelectedLog)
+            {
+                GUI.Label(area, "选择一条日志查看消息和堆栈。");
+                return;
+            }
+
+            if (GUI.Button(new Rect(area.xMax - 54f, area.y, 54f, 22f), "复制"))
+                GUIUtility.systemCopyBuffer = _logDetail;
+            DrawText(new Rect(area.x, area.y + 25f, area.width, area.height - 25f), _logDetail, ref _detailScroll);
+        }
+
+        private void DrawText(Rect area, string text, ref Vector2 scroll)
+        {
+            if (area.height <= 0f) return;
+            GUI.Box(area, GUIContent.none);
+            float viewWidth = Mathf.Max(1f, area.width - 21f);
+            float textWidth = Mathf.Max(1f, viewWidth - 12f);
+            _textContent.text = text;
+            if (!ReferenceEquals(_measuredText, text) || _measuredWidth != textWidth)
+            {
+                _measuredText = text;
+                _measuredWidth = textWidth;
+                _measuredHeight = _detailStyle.CalcHeight(_textContent, textWidth);
+            }
+            scroll = GUI.BeginScrollView(area, scroll, new Rect(0f, 0f, viewWidth, Mathf.Max(area.height, _measuredHeight + 12f)));
+            try
+            {
+                GUI.Label(new Rect(6f, 6f, textWidth, _measuredHeight), _textContent, _detailStyle);
+            }
+            finally { GUI.EndScrollView(); }
+        }
+
+        private void EnsureStyles()
+        {
+            if (_skin == GUI.skin && _logStyle != null) return;
+            _skin = GUI.skin;
+            _logStyle = new GUIStyle(_skin.button)
+            {
+                alignment = TextAnchor.MiddleLeft,
+                clipping = TextClipping.Clip,
+            };
+            _detailStyle = new GUIStyle(_skin.label)
+            {
+                alignment = TextAnchor.UpperLeft,
+                wordWrap = true,
+            };
+            _measuredWidth = 0f;
+        }
+
+        private static int LogLevel(LogType type) => type switch
+        {
+            LogType.Warning => 1,
+            LogType.Error or LogType.Assert => 2,
+            LogType.Exception => 3,
+            _ => 0,
+        };
+
+        private static string GetPreview(string message)
+        {
+            int limit = Mathf.Min(message.Length, PREVIEW_LENGTH);
+            for (int i = 0; i < limit; i++)
+            {
+                if (message[i] != '\r' && message[i] != '\n') continue;
+                limit = i;
+                break;
+            }
+            return limit < message.Length ? message.Substring(0, limit) + "…" : message;
+        }
+
+        private static string BuildPageText(RuntimeDebugSnapshot snapshot)
+        {
+            switch (snapshot.Page)
+            {
+                case RuntimeDebugPage.Performance:
+                    RuntimeDebugPerformanceSnapshot performance = snapshot.Performance;
+                    return $"FPS    {performance.FramesPerSecond:0.0}\n" +
+                           $"平均帧耗时    {performance.AverageFrameMilliseconds:0.00} ms\n" +
+                           $"峰值帧耗时    {performance.PeakFrameMilliseconds:0.00} ms\n\n" +
+                           $"托管内存    {FormatBytes(performance.ManagedUsedBytes)}\n" +
+                           $"Unity 已分配    {FormatBytes(performance.AllocatedBytes)}\n" +
+                           $"Unity 已预留    {FormatBytes(performance.ReservedBytes)}\n\n" +
+                           $"目标帧率    {performance.TargetFrameRate}\n垂直同步间隔    {performance.VSyncCount}";
+                case RuntimeDebugPage.Assets:
+                    if (snapshot.Assets is not AssetCacheSnapshot assets) return "资源模块尚未启用。";
+                    return BuildAssetsText(snapshot, assets);
+                case RuntimeDebugPage.UI:
+                    if (!snapshot.HasUIManager) return "UI 管理器尚未就绪。";
+                    return BuildUIStateText(snapshot);
+                case RuntimeDebugPage.Startup:
+                    return snapshot.Startup is RuntimeDebugStartupSnapshot startup
+                        ? BuildStartupText(startup) : "框架启动器不可用。";
+                default:
+                    return string.Empty;
+            }
+        }
+
+        private static string BuildStartupText(RuntimeDebugStartupSnapshot startup)
+        {
+            string hostState = startup.HostState == TaskStatus.RanToCompletion && !startup.HasActiveHost
+                ? "已停止" : StartupTaskLabel(startup.HostState);
+            string assetState = startup.StartupAssetError == null
+                ? StartupTaskLabel(startup.StartupAssetsState) : "加载失败";
+            var text = new StringBuilder()
+                .Append("启动配置    ").AppendLine(startup.ConfigurationName ?? "—")
+                .Append("运行模式    ").AppendLine(startup.Mode?.ToString() ?? "—")
+                .Append("本地宿主    ").AppendLine(hostState)
+                .Append("常驻资源    ").AppendLine(assetState);
+            if (!string.IsNullOrEmpty(startup.HostError))
+                text.Append("启动错误    ").AppendLine(startup.HostError);
+            if (!string.IsNullOrEmpty(startup.StartupAssetError))
+                text.Append("资源错误    ").AppendLine(startup.StartupAssetError);
+
+            HotUpdateStatus update = startup.HotUpdate;
+            if (update == null) return text.AppendLine().Append("热更    未配置").ToString();
+
+            text.AppendLine()
+                .Append("Player 基线    ").AppendLine(string.IsNullOrEmpty(startup.PlayerBaselineId) ? "—" : startup.PlayerBaselineId)
+                .Append("发行渠道    ").AppendLine(string.IsNullOrEmpty(startup.ChannelId) ? "—" : startup.ChannelId)
+                .Append("当前发行    ").AppendLine(string.IsNullOrEmpty(update.ReleaseId) ? "未选定" : update.ReleaseId)
+                .Append("发行来源    ").AppendLine(ReleaseSourceLabel(update.ReleaseSource))
+                .Append("热更阶段    ").AppendLine(HotUpdateStageLabel(update.Stage));
+            if (!string.IsNullOrEmpty(update.Item))
+                text.Append("阶段详情    ").AppendLine(update.Item);
+            if (!string.IsNullOrEmpty(update.FallbackReason))
+                text.Append("回退原因    ").AppendLine(update.FallbackReason);
+            if (update.Error != null)
+            {
+                text.Append("热更错误    ").AppendLine(update.Error.Message);
+                if (update.IsRestartRequired) text.Append("重试方式    退出进程后重新启动");
+                else if (update.CanRetry) text.Append("重试方式    可在本次运行重试");
+            }
+            return text.ToString();
+        }
+
+        private static string StartupTaskLabel(TaskStatus state) => state switch
+        {
+            TaskStatus.RanToCompletion => "已就绪",
+            TaskStatus.Faulted => "失败",
+            TaskStatus.Canceled => "已取消",
+            _ => "等待就绪",
+        };
+
+        private static string ReleaseSourceLabel(HotUpdateReleaseSource source) => source switch
+        {
+            HotUpdateReleaseSource.Bundled => "随包发行",
+            HotUpdateReleaseSource.Channel => "在线渠道",
+            HotUpdateReleaseSource.Confirmed => "已确认发行",
+            _ => "未选定",
+        };
+
+        private static string HotUpdateStageLabel(HotUpdateStage stage) => stage switch
+        {
+            HotUpdateStage.Configuration => "配置校验",
+            HotUpdateStage.ReleaseSelection => "选择发行",
+            HotUpdateStage.ResourceUpdate => "更新资源",
+            HotUpdateStage.PayloadValidation => "校验产物",
+            HotUpdateStage.AotMetadata => "补充 AOT 元数据",
+            HotUpdateStage.HotfixAssembly => "加载热更程序集",
+            HotUpdateStage.Entry => "执行热更入口",
+            HotUpdateStage.ReleaseConfirmation => "确认发行",
+            HotUpdateStage.Ready => "已就绪",
+            HotUpdateStage.Stopped => "已停止",
+            _ => stage.ToString(),
+        };
+
+        private static string BuildAssetsText(RuntimeDebugSnapshot snapshot, AssetCacheSnapshot assets)
+        {
+            var text = new StringBuilder().Append("活跃租约    ").Append(assets.ActiveLeases).AppendLine()
+                .Append("活跃资源    ").Append(assets.ActiveAssets).AppendLine()
+                .Append("等待加载    ").Append(assets.PendingAssets).AppendLine()
+                .Append("常驻资源    ").Append(assets.ResidentAssets).AppendLine()
+                .Append("空闲资源    ").Append(assets.IdleAssets).AppendLine()
+                .Append("活跃估算    ").Append(FormatBytes(assets.ActiveEstimatedBytes)).AppendLine()
+                .Append("空闲估算    ").Append(FormatBytes(assets.IdleEstimatedBytes)).AppendLine().AppendLine();
+            if (snapshot.AssetLeases.Count == 0) return text.Append("当前没有活跃租约。").ToString();
+
+            text.AppendLine("地址与租约");
+            foreach (AssetLeaseUsage lease in snapshot.AssetLeases)
+                text.Append(lease.Address).Append("    租约 ").Append(lease.LeaseCount)
+                    .Append("    ").Append(FormatBytes(lease.EstimatedBytes)).AppendLine();
+            if (assets.ActiveAssets > snapshot.AssetLeases.Count)
+                text.Append("还有 ").Append(assets.ActiveAssets - snapshot.AssetLeases.Count).Append(" 项资源");
+            return text.ToString();
+        }
+
+        private static string BuildUIStateText(RuntimeDebugSnapshot snapshot)
+        {
+            var text = new StringBuilder().Append("已打开页面    ").Append(snapshot.UIOpenCount).AppendLine();
+            foreach (UIPageResourceUsage page in snapshot.Pages)
+                text.Append(page.ViewType?.Name ?? "未知页面")
+                    .Append(page.Visible ? "    显示" : "    隐藏")
+                    .Append("    租约 ").Append(page.Leases)
+                    .Append("    ").Append(FormatBytes(page.EstimatedBytes)).AppendLine();
+            text.AppendLine().Append("状态控制器    ").Append(snapshot.UIStateCount).AppendLine();
+            foreach (RuntimeDebugUIState state in snapshot.UIStates)
+                text.Append(state.ControllerName).Append(" #").Append(state.InstanceId)
+                    .Append(state.IsActive ? "    启用" : "    停用")
+                    .Append("    当前 ").Append(state.SelectedState)
+                    .Append("    初态 ").Append(state.InitialState).AppendLine();
+            if (snapshot.UIStateCount > snapshot.UIStates.Count)
+                text.Append("还有 ").Append(snapshot.UIStateCount - snapshot.UIStates.Count).Append(" 个状态控制器");
+            return text.ToString();
         }
 
         private static string FormatBytes(long bytes)
         {
-            return bytes >= 1048576L
-                ? $"{bytes / 1048576f:0.0} MB"
-                : $"{bytes / 1024f:0.0} KB";
+            if (bytes < 0L) return "—";
+            if (bytes >= 1048576L) return $"{bytes / 1048576d:0.00} MiB";
+            return $"{bytes / 1024d:0.00} KiB";
         }
 
-        private void DrawTextPage(Rect area, string info)
-        {
-            GUI.Box(area, GUIContent.none);
-            float viewWidth = Mathf.Max(1f, area.width - 20f);
-            float textWidth = Mathf.Max(1f, viewWidth - 20f);
-            float textHeight = DetailStyle.CalcHeight(new GUIContent(info), textWidth);
-            _pageScroll = GUI.BeginScrollView(area, _pageScroll,
-                new Rect(0f, 0f, viewWidth, Mathf.Max(area.height, textHeight + 24f)));
-            GUI.Label(new Rect(10f, 10f, textWidth, textHeight), info, DetailStyle);
-            GUI.EndScrollView();
-        }
-
-        private void DrawOther(Rect area, int page)
-        {
-            GUI.Box(area, GUIContent.none);
-            float x = area.x + 12f;
-            float y = area.y + 10f;
-            if (page == 0)
-            {
-                GUI.Label(new Rect(x, y, area.width - 24f, 30f), "WINDOW SETTINGS");
-                GUI.Label(new Rect(x, y + 36f, area.width - 24f, 28f),
-                    "Drag the title bar to move the window.");
-                GUI.Label(new Rect(x, y + 72f, 105f, 32f), $"Scale: {_windowScale:0.00}");
-                if (GUI.Button(new Rect(x + 110f, y + 70f, 54f, 34f), "-"))
-                    _windowScale = Mathf.Max(0.75f, _windowScale - 0.1f);
-                if (GUI.Button(new Rect(x + 170f, y + 70f, 54f, 34f), "+"))
-                    _windowScale = Mathf.Min(1.5f, _windowScale + 0.1f);
-                if (GUI.Button(new Rect(x, y + 116f, 120f, 34f), "Width −"))
-                    _windowRect.width -= 40f;
-                if (GUI.Button(new Rect(x + 126f, y + 116f, 120f, 34f), "Width +"))
-                    _windowRect.width += 40f;
-                if (GUI.Button(new Rect(x, y + 158f, 120f, 34f), "Height −"))
-                    _windowRect.height -= 40f;
-                if (GUI.Button(new Rect(x + 126f, y + 158f, 120f, 34f), "Height +"))
-                    _windowRect.height += 40f;
-                if (GUI.Button(new Rect(x, y + 204f, 246f, 36f), "Reset Window Layout"))
-                {
-                    _windowScale = 1f;
-                    _iconRect = new Rect(10f, 10f, 120f, 78f);
-                    _windowRect = new Rect(10f, 10f, 680f, 520f);
-                }
-            }
-            else
-            {
-                GUI.Label(new Rect(x, y, area.width - 24f, 30f), "OPERATIONS");
-                if (GUI.Button(new Rect(x, y + 40f, 220f, 38f), "Copy All Logs")) CopyAll();
-                if (GUI.Button(new Rect(x, y + 86f, 220f, 38f), "Clear Logs")) Clear();
-                if (GUI.Button(new Rect(x, y + 132f, 220f, 38f), "Collect Garbage")) GC.Collect();
-                if (GUI.Button(new Rect(x, y + 178f, 220f, 38f), "Unload Unused Assets"))
-                    Resources.UnloadUnusedAssets();
-            }
-        }
-
-        private void CopyAll()
-        {
-            var text = new StringBuilder();
-            for (int i = 0; i < _entries.Count; i++)
-            {
-                LogEntry entry = _entries[i];
-                text.Append('[').Append(entry.Time).Append("] ").Append(entry.Type)
-                    .Append(": ").Append(entry.Message).Append('\n');
-                if (!string.IsNullOrEmpty(entry.StackTrace))
-                    text.Append(entry.StackTrace).Append('\n');
-            }
-            GUIUtility.systemCopyBuffer = text.ToString();
-        }
-
-        private void Clear()
-        {
-            _entries.Clear();
-            _visibleIndices.Clear();
-            _selectedIndex = -1;
-            _infoCount = _warningCount = _errorCount = _fatalCount = 0;
-            _logScroll = _detailScroll = Vector2.zero;
-            _dirty = true;
-        }
-
-        private GUIStyle RowStyle
-        {
-            get
-            {
-                if (_rowStyle == null)
-                {
-                    _rowStyle = new GUIStyle(GUI.skin.button)
-                    {
-                        alignment = TextAnchor.MiddleLeft,
-                        clipping = TextClipping.Clip,
-                        fontSize = 14,
-                    };
-                }
-                return _rowStyle;
-            }
-        }
-
-        private GUIStyle DetailStyle
-        {
-            get
-            {
-                if (_detailStyle == null)
-                {
-                    _detailStyle = new GUIStyle(GUI.skin.label)
-                    {
-                        wordWrap = true,
-                        alignment = TextAnchor.UpperLeft,
-                        fontSize = 15,
-                    };
-                }
-                return _detailStyle;
-            }
-        }
+        #endregion
     }
 }

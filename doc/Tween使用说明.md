@@ -39,3 +39,5 @@ sequence.SetTimeMode(TweenTimeMode.Unscaled).SetOwner(group).Play();
 编辑器和测试可对尚未播放或已暂停的动画调用 `Seek(seconds)` 设置画面，或通过 `TweenScheduler.Tick(scaledDelta, unscaledDelta)` 手动推进。`Seek` 不派发完成回调，播放中的动画需先 `Pause()`。运行时通常由默认注册的 TweenModule 推进，不应另行调用 Tick。页面转场默认使用非缩放时间，使游戏暂停时也能播放。
 
 编辑器预览结束时需要恢复预览前记录的组件属性；`Seek(0)` 只返回动画起点，不负责恢复用户原本的 Prefab 值。
+
+UI 时间轴事件在自然播放中派发。`Seek` 跳过定位时间及此前的事件，`Complete` 直接写入终值并执行完成回调。使用 `Restart()` 可从 0 秒重新派发。 [UI 时间轴](UI框架使用说明.md#ui-时间轴)

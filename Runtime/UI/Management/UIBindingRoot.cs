@@ -4,6 +4,7 @@ using UnityEngine;
 
 namespace EasyFramework.UI
 {
+    /// <summary>保存界面节点的 View 脚本与控件绑定。</summary>
     [DisallowMultipleComponent, RequireComponent(typeof(RectTransform))]
     public abstract class UIBindingRoot : MonoBehaviour
     {
@@ -11,8 +12,8 @@ namespace EasyFramework.UI
         [SerializeField] private string _viewScriptGuid;
         [SerializeField] private UIControlReference[] _controls = Array.Empty<UIControlReference>();
 
+        /// <summary>此绑定根节点对应的界面类型。</summary>
         public abstract UIPageKind Kind { get; }
-        public virtual string PrefabLocation => string.Empty;
         public string ViewTypeName => _viewTypeName;
         public string ViewScriptGuid => _viewScriptGuid;
         public IReadOnlyList<UIControlReference> Controls => _controls;

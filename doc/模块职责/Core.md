@@ -1,9 +1,26 @@
 # Core
 
-`ModuleManager` 管理注册、初始化和逆序关闭。模块继承 `Module<T>`，`Instance` 从当前管理器取用。只有实现 `IFrameUpdate` 的模块会进入逐帧调度。Core 不依赖具体功能模块。
+`ModuleComposition` 声明模块工厂和必需的模块类型。`ModuleManager` 持有一份宿主专用的模块实例和生命周期。Unity 场景通过 `FrameworkLauncher` 选择配置并驱动这个管理器。
 
-`Register<T>(order: 0)` 指定初始化阶段，数字越小越先执行。依赖别的模块时，把依赖放在更早的阶段。同一阶段按注册顺序开始初始化，异步等待可以重叠，当前阶段全部完成后才进入下一阶段。同步初始化放在 `OnInit()`，异步初始化重写 `OnInitAsync(CancellationToken)` 并传递令牌。两者都从 Unity 主线程调用。
+`com.wjq.easyframework.core` 是独立的纯 C# 程序集，提供模块宿主、帧时钟、运行模式和日志。Unity Runtime 依赖 Core。使用自定义 `.asmdef` 的项目模块、启动装配器和热更入口，在直接使用这些类型时引用 Core。
 
-场景入口通过 `await FrameworkLauncher.Instance.Ready` 等待模块及 UI、Loading 宿主就绪。运行期可通过 `await ModuleManager.Current.InstallAsync(...)` 安装一批模块。已启动模块会继续 Tick，新批次就绪后开始 Tick。
+```csharp
+var composition = new ModuleComposition();
+composition.Add<AssetModule>();
+composition.Add<AudioModule>(typeof(AssetModule));
 
-初始化失败会取消同批任务，等它们结束后逆序收尾并移除该批模块。模块可以在 `OnShutdownAsync()` 中等待异步清理，框架等待该模块结束后再按初始化的逆序关闭下一个模块。需要保证清理完成的业务入口应等待 `ModuleManager.Current.StopAsync()`。
+var host = new ModuleManager(runtimeMode: RuntimeMode.Offline);
+await host.StartAsync(composition);
+AudioModule audio = host.Require<AudioModule>();
+// 每帧由驱动器传入两路时钟，退出时等待 host.StopAsync()。
+host.Tick(new FrameTime(scaledDeltaTime, unscaledDeltaTime));
+```
+
+1. 先检查完整模块图。缺依赖时报告依赖方和缺失类型，循环时报告循环路径。两种错误都在调用任何工厂和初始化回调前抛出。
+2. 按依赖排序。工厂通过其 `ModuleManager` 参数获取已经就绪的依赖。`OnInit()` 执行同步初始化，`OnInitAsync(CancellationToken)` 执行可取消的异步初始化。同阶段任务可重叠，全部成功后才发布该阶段的就绪模块。
+3. 初始化失败时取消同阶段任务，等已进入的初始化退出后，按进入顺序的反向逐个调用 `OnShutdownAsync()` 和 `OnShutdown()`。关闭异常记录后继续清理剩余模块。
+4. 启动成功后只调度实现了 `IFrameUpdate` 的模块。停止时先暂停帧调度，再按相同的逆序规则关闭。显式装配的模块图在启动后固定。
+
+每次调用 `Tick` 时，所有更新模块接收同一份 `FrameTime`。Unity Launcher 使用 `Time.deltaTime` 和 `Time.unscaledDeltaTime` 创建这份值。
+
+Unity 入口持有对应 `FrameworkLauncher` 的引用，等待 `launcher.Ready`，再从 `launcher.Modules` 获取模块。模块内部用 `Host.Require<T>()` 引用其声明的依赖。`Module<T>.Instance` 按当前宿主作用域查找，作用域外使用显式默认宿主。初始化、关闭和同步帧回调带有作用域。延迟或异步回调可直接持有宿主，或在回调内用 `using var scope = host.EnterScope();` 建立跨 `await` 的作用域。

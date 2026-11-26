@@ -1,0 +1,169 @@
+.state-workbench {
+    flex-grow: 1;
+    padding: 8px;
+}
+
+.state-header, .state-toolbar {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    margin-bottom: 5px;
+}
+
+.state-header > Button, .state-toolbar > Button {
+    margin-right: 4px;
+}
+
+.state-controller, .state-search {
+    flex-grow: 1;
+    min-width: 130px;
+}
+
+.state-controller > .unity-base-field__label,
+.state-initial > .unity-base-field__label {
+    min-width: 66px;
+}
+
+.state-layout {
+    flex-grow: 1;
+    flex-direction: row;
+    min-height: 0;
+    margin-top: 5px;
+}
+
+.state-sidebar {
+    width: 204px;
+    flex-shrink: 0;
+    min-height: 0;
+    margin-right: 8px;
+    padding: 6px;
+}
+
+.state-list {
+    flex-grow: 1;
+    min-height: 44px;
+    margin-bottom: 6px;
+}
+
+.state-selector {
+    height: 26px;
+    -unity-text-align: middle-left;
+    padding-left: 8px;
+}
+
+.state-selector--selected {
+    background-color: #c9e3f8;
+    border-color: #6a9fc8;
+}
+
+.state-workbench--dark .state-selector--selected {
+    background-color: #315575;
+    border-color: #6a9fc8;
+}
+
+.state-main {
+    flex-grow: 1;
+    min-width: 0;
+    min-height: 0;
+}
+
+.state-card, .state-sidebar, .state-nodes {
+    border-width: 1px;
+    border-color: #aaaab0;
+    border-radius: 3px;
+}
+
+.state-workbench--dark .state-card,
+.state-workbench--dark .state-sidebar,
+.state-workbench--dark .state-nodes {
+    border-color: #58585c;
+}
+
+.state-card {
+    margin-top: 6px;
+    padding: 6px;
+}
+
+.state-heading {
+    -unity-font-style: bold;
+    margin: 3px 9px 4px 1px;
+    white-space: normal;
+}
+
+.state-nodes {
+    height: 158px;
+    flex-shrink: 0;
+}
+
+.state-node {
+    flex-direction: row;
+    align-items: center;
+    height: 24px;
+    padding-left: 5px;
+    padding-right: 7px;
+}
+
+.state-node > #path {
+    flex-grow: 1;
+    flex-shrink: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.state-node > #usage {
+    flex-shrink: 0;
+    opacity: 0.78;
+    margin-left: 8px;
+}
+
+.state-field-choices, .state-batch-values, .state-property {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+.state-field-choices > Toggle {
+    margin-right: 9px;
+    min-width: 48px;
+}
+
+.state-field-choices > Toggle > .unity-base-field__label {
+    min-width: 0;
+}
+
+.state-batch-values {
+    margin-top: 4px;
+    margin-bottom: 4px;
+}
+
+.state-property {
+    min-height: 24px;
+    margin-bottom: 2px;
+    padding-left: 4px;
+    border-left-width: 2px;
+    border-left-color: transparent;
+}
+
+.state-property--override {
+    border-left-color: #6a9fc8;
+}
+
+.state-value {
+    flex-grow: 1;
+    min-width: 126px;
+    margin-right: 5px;
+}
+
+.state-value > .unity-base-field__label {
+    min-width: 62px;
+}
+
+.state-baseline {
+    width: 122px;
+    opacity: 0.76;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}

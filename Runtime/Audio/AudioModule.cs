@@ -211,7 +211,7 @@ namespace EasyFramework
             for (int i = _sounds.Count - 1; i >= 0; i--) ReleaseSoundAt(i);
         }
 
-        void IFrameUpdate.Tick(float deltaTime)
+        void IFrameUpdate.Tick(FrameTime frameTime)
         {
             if ((_music?.Lease == null && _sounds.Count == 0) || AudioListener.pause) return;
             if (_music?.Lease != null && Finished(_music)) Release(_music);
@@ -374,8 +374,8 @@ namespace EasyFramework
             return (int)channel;
         }
 
-        private static AssetModule RequireAssets() =>
-            AssetModule.Instance ?? throw new InvalidOperationException("请在 Startup Config 中配置音频资源包。");
+        private AssetModule RequireAssets() =>
+            Host.Get<AssetModule>() ?? throw new InvalidOperationException("请为当前宿主配置音频资源包。");
 
         private void VerifyRunning()
         {

@@ -51,9 +51,14 @@ namespace EasyFramework
             if (_disposed) return;
             _module.VerifyThread();
             _disposed = true;
-            _stop.Cancel();
+            try { _stop.Cancel(); }
+            catch (Exception exception) { Log.Error("[Assets] 取消作用域请求失败。", exception); }
             _stop.Dispose();
-            foreach (IDisposable lease in _leases.Values) lease.Dispose();
+            foreach (IDisposable lease in _leases.Values)
+            {
+                try { lease.Dispose(); }
+                catch (Exception exception) { Log.Error("[Assets] 归还作用域租约失败。", exception); }
+            }
             _leases.Clear();
         }
     }

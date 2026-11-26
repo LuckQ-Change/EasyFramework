@@ -3,49 +3,105 @@ using System.Collections.Generic;
 
 namespace EasyFramework.Tweening
 {
-    /// <summary>统一推进运行中的 Tween；可由测试和编辑器手动调用。</summary>
+    /// <summary>在当前宿主或独立编辑环境中手动操作 Tween 调度。</summary>
     public static class TweenScheduler
     {
-        private static readonly List<TweenHandle> Active = new List<TweenHandle>();
-        private static readonly List<TweenHandle> Pending = new List<TweenHandle>();
-        private static bool _updating;
-        private static bool _shuttingDown;
+        private static readonly TweenQueue _manualQueue = new TweenQueue();
 
-        public static int ActiveCount
+        /// <summary>当前调度器中正在播放的动画数量。</summary>
+        public static int ActiveCount => ResolveQueue().ActiveCount;
+
+        /// <summary>手动推进当前调度器一帧。</summary>
+        /// <param name="scaledDeltaTime">受时间缩放影响的帧时间。</param>
+        /// <param name="unscaledDeltaTime">未缩放的帧时间。</param>
+        public static void Tick(float scaledDeltaTime, float unscaledDeltaTime) =>
+            ResolveQueue().Tick(scaledDeltaTime, unscaledDeltaTime);
+
+        /// <summary>停止当前调度器中的全部动画。</summary>
+        public static void KillAll() => ResolveQueue().Clear();
+
+        internal static TweenQueue ResolveQueue()
+        {
+            ModuleManager host = ModuleManager.Current;
+            if (host == null) return _manualQueue;
+            return host.Get<TweenModule>()?.Queue ??
+                   throw new InvalidOperationException("请在当前宿主装配 TweenModule 后播放动画。");
+        }
+    }
+
+    /// <summary>保存一个宿主或独立编辑环境的动画队列。</summary>
+    internal sealed class TweenQueue
+    {
+        private readonly List<TweenHandle> _active = new List<TweenHandle>();
+        private readonly List<TweenHandle> _pending = new List<TweenHandle>();
+        private ModuleManager _host;
+        private bool _isUpdating;
+        private bool _isClearing;
+        private bool _isClosed;
+        private int _clearVersion;
+
+        internal int ActiveCount
         {
             get
             {
                 int count = 0;
-                foreach (TweenHandle tween in Active)
+                foreach (TweenHandle tween in _active)
                     if (tween.IsPlaying && !tween.IsKilled && !tween.IsComplete) count++;
-                foreach (TweenHandle tween in Pending)
+                foreach (TweenHandle tween in _pending)
                     if (tween.IsPlaying && !tween.IsKilled && !tween.IsComplete) count++;
                 return count;
             }
         }
 
-        internal static void Register(TweenHandle tween)
+        internal void BindHost(ModuleManager host) => _host = host;
+
+        internal IDisposable EnterScopeIfNeeded() =>
+            _host != null && !ReferenceEquals(_host, ModuleManager.Current) ? _host.EnterScope() : null;
+
+        internal void Play(TweenHandle tween)
         {
-            if (_shuttingDown) { tween.Kill(); return; }
-            if (Active.Contains(tween) || Pending.Contains(tween)) return;
-            if (_updating) Pending.Add(tween);
-            else Active.Add(tween);
+            // 暂停的动画可在别的宿主调用链中恢复，初始写值和回调仍归原宿主。
+            using var scope = EnterScopeIfNeeded();
+            if (_isClosed || _isClearing)
+            {
+                tween.Kill();
+                return;
+            }
+
+            int clearVersion = _clearVersion;
+            List<TweenHandle> added = null;
+            if (!_active.Contains(tween) && !_pending.Contains(tween))
+            {
+                // 起点回调可能立即取消整个队列。启动中的句柄也必须参与取消。
+                added = _isUpdating ? _pending : _active;
+                added.Add(tween);
+            }
+            try { tween.StartEmbedded(); }
+            catch
+            {
+                added?.Remove(tween);
+                throw;
+            }
+
+            if (_isClosed || clearVersion != _clearVersion)
+                tween.Kill();
+            if (tween.IsKilled || tween.IsComplete) added?.Remove(tween);
         }
 
-        /// <summary>推进一次；运行时由 TweenModule 调用，编辑器和测试可手动调用。</summary>
-        public static void Tick(float scaledDeltaTime, float unscaledDeltaTime)
+        internal void Tick(float scaledDeltaTime, float unscaledDeltaTime)
         {
-            if (_updating) throw new InvalidOperationException("TweenScheduler.Tick cannot be called recursively.");
+            if (_isUpdating) throw new InvalidOperationException("TweenScheduler.Tick cannot be called recursively.");
+            if (_isClosed || _isClearing) return;
             if (float.IsNaN(scaledDeltaTime) || float.IsInfinity(scaledDeltaTime) || scaledDeltaTime < 0f)
                 throw new ArgumentOutOfRangeException(nameof(scaledDeltaTime));
             if (float.IsNaN(unscaledDeltaTime) || float.IsInfinity(unscaledDeltaTime) || unscaledDeltaTime < 0f)
                 throw new ArgumentOutOfRangeException(nameof(unscaledDeltaTime));
-            _updating = true;
+            _isUpdating = true;
             try
             {
-                for (int i = 0; i < Active.Count; i++)
+                for (int i = 0; i < _active.Count; i++)
                 {
-                    TweenHandle tween = Active[i];
+                    TweenHandle tween = _active[i];
                     if (!tween.IsPlaying || tween.IsKilled || tween.IsComplete) continue;
                     try
                     {
@@ -55,38 +111,55 @@ namespace EasyFramework.Tweening
                     catch (Exception exception)
                     {
                         Log.Error("[Tween] update failed.", exception);
-                        tween.Kill();
+                        KillSafely(tween);
                     }
                 }
             }
             finally
             {
-                _updating = false;
+                _isUpdating = false;
                 int retained = 0;
-                for (int i = 0; i < Active.Count; i++)
+                for (int i = 0; i < _active.Count; i++)
                 {
-                    TweenHandle tween = Active[i];
-                    if (!tween.IsKilled && !tween.IsComplete) Active[retained++] = tween;
+                    TweenHandle tween = _active[i];
+                    if (!tween.IsKilled && !tween.IsComplete) _active[retained++] = tween;
                 }
-                if (retained < Active.Count) Active.RemoveRange(retained, Active.Count - retained);
-                foreach (TweenHandle tween in Pending)
-                    if (!tween.IsKilled && !tween.IsComplete) Active.Add(tween);
-                Pending.Clear();
+                if (retained < _active.Count) _active.RemoveRange(retained, _active.Count - retained);
+                foreach (TweenHandle tween in _pending)
+                    if (!tween.IsKilled && !tween.IsComplete) _active.Add(tween);
+                _pending.Clear();
             }
         }
 
-        /// <summary>停止全部动画并释放调度记录，不派发完成回调。</summary>
-        public static void KillAll()
+        internal void Close()
         {
-            _shuttingDown = true;
+            _isClosed = true;
+            try { Clear(); }
+            finally { _host = null; }
+        }
+
+        internal void Clear()
+        {
+            if (_isClearing) return;
+            _isClearing = true;
+            _clearVersion++;
             try
             {
-                foreach (TweenHandle tween in Active) tween.Kill();
-                foreach (TweenHandle tween in Pending) tween.Kill();
-                Active.Clear();
-                Pending.Clear();
+                foreach (TweenHandle tween in _active) KillSafely(tween);
+                foreach (TweenHandle tween in _pending) KillSafely(tween);
             }
-            finally { _shuttingDown = false; }
+            finally
+            {
+                _active.Clear();
+                _pending.Clear();
+                _isClearing = false;
+            }
+        }
+
+        private static void KillSafely(TweenHandle tween)
+        {
+            try { tween.Kill(); }
+            catch (Exception exception) { Log.Error("[Tween] 停止动画失败。", exception); }
         }
     }
 }

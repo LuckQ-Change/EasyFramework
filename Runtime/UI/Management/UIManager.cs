@@ -8,11 +8,16 @@ using Object = UnityEngine.Object;
 
 namespace EasyFramework.UI
 {
+    /// <summary>记录一个页面在查询时持有的资源。</summary>
     public readonly struct UIPageResourceUsage
     {
+        /// <summary>页面的 View 类型。</summary>
         public Type ViewType { get; }
+        /// <summary>页面在宿主中是否可见。</summary>
         public bool Visible { get; }
+        /// <summary>页面持有的资源租约数量。</summary>
         public int Leases { get; }
+        /// <summary>页面所持资源的估算字节数。</summary>
         public long EstimatedBytes { get; }
 
         internal UIPageResourceUsage(Type viewType, bool visible, int leases, long estimatedBytes)
@@ -24,8 +29,32 @@ namespace EasyFramework.UI
         }
     }
 
+    /// <summary>管理默认 UI 宿主的页面实例、导航和资源租约。</summary>
     public sealed class UIManager
     {
+        /// <summary>一次开页使用的页面声明及实例创建方式。</summary>
+        private readonly struct PageRoute
+        {
+            private readonly UIPageFactoryBinding _factory;
+            internal readonly UIPageEntry Entry;
+
+            internal Type ViewType => _factory.ViewType;
+            internal UIPageKind Kind => Entry.Kind;
+            internal string Address => Entry.PrefabAddress;
+
+            internal PageRoute(UIPageEntry entry, UIPageFactoryBinding factory)
+            {
+                Entry = entry;
+                _factory = factory;
+            }
+
+            internal UIView Create() => _factory.Create();
+
+            internal bool Matches(UIDisplay display) => display != null && display.Kind == Kind &&
+                string.Equals(display.ViewScriptGuid, Entry.FactoryKey, StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>持有页面、导航规则和关闭所需的状态。</summary>
         private sealed class Window
         {
             public UIDisplay Display;
@@ -34,25 +63,42 @@ namespace EasyFramework.UI
             public bool Retiring;
             public bool Finished;
             public readonly TaskCompletionSource<bool> Closed = new(TaskCreationOptions.RunContinuationsAsynchronously);
-            public UIPageKind Kind;
+            public UIPageEntry Entry;
+            public UIPageKind Kind => Entry.Kind;
         }
 
         private static bool _quitting;
+        private static UIManager _current;
         private readonly Dictionary<Type, Window> _windows = new();
+        private readonly HashSet<Type> _constructingViews = new();
         private readonly List<Window> _order = new();
         private readonly Dictionary<UILayer, RectTransform> _layers = new();
         private UIRuntimeHost _host;
+        private UIPageManifest _pageManifest;
         private UIBackground _background;
         private Transform _inactiveRoot;
         private CancellationTokenSource _screenRequest;
         private bool _stopping;
+        private int _openingPages;
 
-        public static UIManager Current { get; private set; }
+        internal static bool HasDefaultPresentationScope
+        {
+            get
+            {
+                ModuleManager scope = ModuleManager.Current;
+                return scope == null || ReferenceEquals(scope, ModuleManager.Default);
+            }
+        }
+
+        /// <summary>读取默认宿主中已有的 UI 管理器。</summary>
+        public static UIManager Current => HasDefaultPresentationScope ? _current : null;
+
+        /// <summary>获取或创建默认宿主的 UI 管理器。</summary>
         public static UIManager Instance
         {
             get
             {
-                if (_quitting) return null;
+                if (_quitting || !HasDefaultPresentationScope) return null;
                 if (Current != null) return Current;
                 UIRuntimeHost host = Object.FindObjectOfType<UIRuntimeHost>(true);
                 if (host == null)
@@ -66,9 +112,13 @@ namespace EasyFramework.UI
             }
         }
 
+        /// <summary>当前管理器使用的 Unity UI 宿主。</summary>
         public UIRuntimeHost RuntimeHost => _host;
+        /// <summary>导航栈中的页面数量。</summary>
         public int OpenCount => _order.Count;
 
+        /// <summary>获取各页面当前占用的资源租约。</summary>
+        /// <returns>当前导航栈中的页面资源快照。</returns>
         public IReadOnlyList<UIPageResourceUsage> GetResourceSnapshot()
         {
             var pages = new List<UIPageResourceUsage>(_order.Count);
@@ -86,72 +136,138 @@ namespace EasyFramework.UI
             return pages;
         }
 
+        #region 生命周期
+
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         private static void Reset()
         {
-            Current = null;
+            _current = null;
             _quitting = false;
         }
 
         internal static bool TryAttachHost(UIRuntimeHost host, out UIManager manager)
         {
             manager = null;
-            if (_quitting || (Current != null && Current._host != host)) return false;
-            if (Current == null)
+            if (_quitting || !HasDefaultPresentationScope || (_current != null && _current._host != host)) return false;
+            if (_current == null)
             {
-                Current = new UIManager { _host = host };
-                host.SetManager(Current);
-                Current.RefreshCanvasSettings(host);
+                _current = new UIManager
+                {
+                    _host = host,
+                    _pageManifest = FrameworkLauncher.Instance?.ActiveConfig?.PageManifest,
+                };
+                host.SetManager(_current);
+                _current.RefreshCanvasSettings(host);
             }
-            manager = Current;
+            manager = _current;
             return true;
         }
 
         internal static void NotifyApplicationQuit()
         {
             _quitting = true;
-            Current?.Stop();
+            _current?.Stop();
         }
 
         internal static void ReleaseHost(UIRuntimeHost host)
         {
-            if (Current == null || !ReferenceEquals(Current._host, host)) return;
-            Current.Stop();
-            Current = null;
+            if (_current == null || !ReferenceEquals(_current._host, host)) return;
+            _current.Stop();
+            _current = null;
         }
 
+        internal void SetPageManifest(UIPageManifest manifest)
+        {
+            if (ReferenceEquals(_pageManifest, manifest)) return;
+            // 页面实例和在途开页归属于同一份清单，避免配置重用时混入两套地址和工厂。
+            if (_windows.Count != 0 || _openingPages != 0)
+                throw new InvalidOperationException("请关闭现有页面并结束在途开页，再更换 UI 页面清单。");
+            _pageManifest = manifest;
+        }
+
+        #endregion
+
+        #region 公共方法
+
+        /// <summary>获取当前由宿主管理的指定类型页面。</summary>
+        /// <typeparam name="T">页面的 View 类型。</typeparam>
+        /// <returns>已存在且尚未退出导航栈的页面，未打开时为空。</returns>
         public T Get<T>() where T : UIView =>
             _windows.TryGetValue(typeof(T), out Window window) && !window.Retiring ? (T)window.View : null;
 
-        internal Task<T> OpenAsync<T>(object args, UIPageKind kind, CancellationToken token, Action<T> prepare = null)
-            where T : UIView, new() => kind == UIPageKind.Screen
-                ? OpenScreenAsync<T>(args, token)
-                : OpenCoreAsync(args, kind, token, prepare);
+        /// <summary>返回时优先处理顶层弹窗，其次处理切换中的页面和顶层主界面。</summary>
+        /// <returns>当前导航操作完成的任务。</returns>
+        public Task BackAsync()
+        {
+            Window window = Top(UIPageKind.Popup);
+            if (window == null)
+            {
+                if (CancelScreenOpen()) return Task.CompletedTask;
+                window = Top(UIPageKind.Screen);
+            }
+            bool canClose = window != null && window.Entry.CanCloseOnBack;
+            return canClose ? Close(window) : Task.CompletedTask;
+        }
 
-        private async Task<T> OpenScreenAsync<T>(object args, CancellationToken token) where T : UIView, new()
+        #endregion
+
+        #region 私有逻辑
+
+        internal async Task<T> OpenAsync<T>(object args, UIPageKind kind, CancellationToken token, Action<T> prepare = null)
+            where T : UIView
         {
             EnsureAvailable(token);
+            Type type = typeof(T);
+            PageRoute route = ResolveRoute(RequireEntry(_pageManifest, type));
+            if (route.ViewType != type || route.Kind != kind)
+                throw new InvalidOperationException($"{type.Name} 的页面工厂或导航类型与开页方式不匹配。");
+
+            Action<UIView> beforePresent = prepare == null ? null : view => prepare((T)view);
+            return (T)await OpenPageAsync(route, args, token, beforePresent);
+        }
+
+        internal async Task<UIView> OpenAsync(string pageId, object args, CancellationToken token)
+        {
+            EnsureAvailable(token);
+            PageRoute route = ResolveRoute(RequireEntry(_pageManifest, pageId));
+            Action<UIView> prepare = route.Kind == UIPageKind.Popup ? static view => view.CompleteResult() : null;
+            return await OpenPageAsync(route, args, token, prepare);
+        }
+
+        private async Task<UIView> OpenPageAsync(PageRoute route, object args, CancellationToken token, Action<UIView> prepare)
+        {
+            if (_constructingViews.Contains(route.ViewType))
+                throw new InvalidOperationException($"页面「{route.Entry.Id}」正在创建，工厂不能再次打开该页面。");
+            _openingPages++;
+            try
+            {
+                if (route.Kind != UIPageKind.Screen) return await OpenCoreAsync(route, args, token, prepare);
+                return await OpenScreenAsync(route, args, token);
+            }
+            finally { _openingPages--; }
+        }
+
+        private async Task<UIView> OpenScreenAsync(PageRoute route, object args, CancellationToken token)
+        {
             using var request = CancellationTokenSource.CreateLinkedTokenSource(token);
             CancellationTokenSource previous = _screenRequest;
             _screenRequest = request;
             previous?.Cancel();
-            try { return await OpenCoreAsync<T>(args, UIPageKind.Screen, request.Token, null); }
+            try { return await OpenCoreAsync(route, args, request.Token, null); }
             finally
             {
                 if (ReferenceEquals(_screenRequest, request)) _screenRequest = null;
             }
         }
 
-        private async Task<T> OpenCoreAsync<T>(object args, UIPageKind kind, CancellationToken token, Action<T> prepare)
-            where T : UIView, new()
+        private async Task<UIView> OpenCoreAsync(PageRoute route, object args, CancellationToken token, Action<UIView> prepare)
         {
             EnsureAvailable(token);
-            Type type = typeof(T);
+            Type type = route.ViewType;
             if (_windows.TryGetValue(type, out Window existing) && !existing.Display.IsClosing)
                 return PresentExisting(existing, args, prepare);
 
-            string address = AddressOf(type);
-            AssetLease<GameObject> lease = await RequireAssets().AcquireAsync<GameObject>(address, token);
+            AssetLease<GameObject> lease = await RequireAssets().AcquireAsync<GameObject>(route.Address, token);
             try
             {
                 while (_windows.TryGetValue(type, out existing))
@@ -162,25 +278,20 @@ namespace EasyFramework.UI
                 }
                 EnsureAvailable(token);
                 UIDisplay template = lease.Asset.GetComponent<UIDisplay>();
-                if (template == null || template.Kind != kind ||
-                    !string.Equals(template.PrefabLocation, address, StringComparison.Ordinal) ||
-                    UIFactory.ResolveType(template.ViewTypeName) != type)
-                    throw new InvalidOperationException($"{type.Name} 的 Prefab 类型、用途或资源地址不匹配。");
+                if (!route.Matches(template))
+                    throw new InvalidOperationException($"页面「{route.Entry.Id}」的 Prefab 与开页声明不匹配（{route.Address}）。");
 
-                UILayer layer = kind == UIPageKind.Popup ? UILayer.Popup : UILayer.Screen;
-                var view = new T();
-                UIDisplay display = InstantiateHidden(template, GetLayerRoot(layer));
-                display.name = template.name;
-                SetLayer(display.transform, _host.UILayer);
-                var window = new Window { Display = display, View = view, Lease = lease, Kind = kind };
-                lease = null;
+                Window window = CreateWindow(route, template, lease, token);
+                UIView view = window.View;
+                UIDisplay display = window.Display;
                 _windows.Add(type, window);
+                lease = null;
                 _order.Add(window);
                 display.Attach(this, view);
                 try
                 {
-                    prepare?.Invoke(view);
                     view.SetArguments(args);
+                    prepare?.Invoke(view);
                     view.Initialize(display);
                     EnsureAvailable(token);
                     if (!display.IsClosing)
@@ -200,6 +311,34 @@ namespace EasyFramework.UI
             finally { lease?.Dispose(); }
         }
 
+        private Window CreateWindow(PageRoute route, UIDisplay template, AssetLease<GameObject> lease, CancellationToken token)
+        {
+            _constructingViews.Add(route.ViewType);
+            UIView view = null;
+            UIDisplay display = null;
+            try
+            {
+                UIView created = route.Create();
+                if (created.IsDisposed || created.HasDisplay)
+                    throw new InvalidOperationException($"页面「{route.Entry.Id}」的工厂须创建新的 {route.ViewType.Name} 实例。");
+                view = created;
+                EnsureAvailable(token);
+                UILayer layer = route.Kind == UIPageKind.Popup ? UILayer.Popup : UILayer.Screen;
+                display = InstantiateHidden(template, GetLayerRoot(layer));
+                display.name = template.name;
+                SetLayer(display.transform, _host.UILayer);
+                return new Window { Display = display, View = view, Lease = lease, Entry = route.Entry };
+            }
+            catch
+            {
+                if (display != null) Destroy(display.gameObject);
+                try { view?.Dispose(); }
+                catch (Exception exception) { Log.Error("[UI] 页面工厂回收失败。", exception); }
+                throw;
+            }
+            finally { _constructingViews.Remove(route.ViewType); }
+        }
+
         private UIDisplay InstantiateHidden(UIDisplay template, RectTransform layer)
         {
             if (!template.gameObject.activeSelf) return Object.Instantiate(template, layer, false);
@@ -216,13 +355,14 @@ namespace EasyFramework.UI
             return display;
         }
 
-        private T PresentExisting<T>(Window window, object args, Action<T> prepare) where T : UIView
+        private UIView PresentExisting(Window window, object args, Action<UIView> prepare)
         {
-            var view = (T)window.View;
+            UIView view = window.View;
+            // 参数类型错误时保留当前页面和它正在等待的弹窗结果。
+            view.SetArguments(args);
             prepare?.Invoke(view);
             try
             {
-                view.SetArguments(args);
                 _order.Remove(window);
                 _order.Add(window);
                 Present(window);
@@ -243,17 +383,6 @@ namespace EasyFramework.UI
             else
                 Reveal(window);
             SyncBackdrop();
-        }
-
-        public Task BackAsync()
-        {
-            Window window = Top(UIPageKind.Popup);
-            if (window == null)
-            {
-                if (CancelScreenOpen()) return Task.CompletedTask;
-                window = Top(UIPageKind.Screen);
-            }
-            return window != null && window.Display.CloseOnBack ? Close(window) : Task.CompletedTask;
         }
 
         private bool CancelScreenOpen()
@@ -419,8 +548,9 @@ namespace EasyFramework.UI
             _background.gameObject.SetActive(true);
             _background.transform.SetAsLastSibling();
             popup.Display.transform.SetAsLastSibling();
+            bool canClose = popup.Entry.CanCloseOnBackground;
             _background.Configure(popup.Display.BackgroundColor, true,
-                popup.Display.CloseOnBackground && !popup.Display.IsClosing ? () => _ = Close(popup) : null);
+                canClose && !popup.Display.IsClosing ? () => _ = Close(popup) : null);
         }
 
         private void Stop()
@@ -444,13 +574,46 @@ namespace EasyFramework.UI
         internal static AssetModule RequireAssets() => AssetModule.Instance ??
             throw new InvalidOperationException("请在 Startup Config 配置 UI 资源包。");
 
-        internal static string AddressOf(Type type)
+        internal static string AddressOf(Type type) => RequireEntry(ActivePageManifest(), type).PrefabAddress;
+
+        internal static string AddressOf(string pageId) => RequireEntry(ActivePageManifest(), pageId).PrefabAddress;
+
+        private static UIPageManifest ActivePageManifest()
         {
-            string address = UIFactory.Address(type);
-            if (!string.IsNullOrWhiteSpace(address)) return address;
-            throw new InvalidOperationException($"{type.Name} 缺少 UI 资源地址。");
+            UIManager manager = Current;
+            if (manager != null) return manager._pageManifest;
+            return FrameworkLauncher.Instance?.ActiveConfig?.PageManifest;
         }
 
+        private static UIPageEntry RequireEntry(UIPageManifest manifest, Type type)
+        {
+            if (manifest == null) throw new InvalidOperationException("请先在 Startup Config 配置 UI 页面清单。");
+            string key = UIPageFactories.FindKey(type);
+            if (string.IsNullOrEmpty(key))
+                throw new InvalidOperationException($"{type.Name} 尚未注册页面工厂。请从清单同步生成脚本。");
+            return manifest.FindByFactoryKey(key) ??
+                   throw new InvalidOperationException($"{type.Name} 尚未登记在当前 UI 页面清单。");
+        }
+
+        private static UIPageEntry RequireEntry(UIPageManifest manifest, string pageId)
+        {
+            if (string.IsNullOrWhiteSpace(pageId)) throw new ArgumentException("页面 ID 不能为空。", nameof(pageId));
+            if (manifest == null) throw new InvalidOperationException("请先在 Startup Config 配置 UI 页面清单。");
+            return manifest.FindById(pageId) ??
+                   throw new InvalidOperationException($"页面「{pageId}」尚未登记在当前 UI 页面清单。");
+        }
+
+        private static PageRoute ResolveRoute(UIPageEntry entry)
+        {
+            UIPageFactoryBinding factory = UIPageFactories.Find(entry.FactoryKey);
+            if (factory == null)
+                throw new InvalidOperationException($"页面「{entry.Id}」缺少工厂绑定。请从清单同步生成脚本。");
+            return new PageRoute(entry, factory);
+        }
+
+        /// <summary>获取或创建指定导航层对应的画布根节点。</summary>
+        /// <param name="layer">页面显示层级。</param>
+        /// <returns>指定层的布局根节点。</returns>
         public RectTransform GetLayerRoot(UILayer layer)
         {
             if (_layers.TryGetValue(layer, out RectTransform rect) && rect != null) return rect;
@@ -500,5 +663,7 @@ namespace EasyFramework.UI
             if (Application.isPlaying) Object.Destroy(target);
             else Object.DestroyImmediate(target);
         }
+
+        #endregion
     }
 }

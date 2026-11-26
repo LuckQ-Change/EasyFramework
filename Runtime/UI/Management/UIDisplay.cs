@@ -21,32 +21,32 @@ namespace EasyFramework.UI
         }
     }
 
+    /// <summary>连接页面或列表项 Prefab 与它的运行时 View。</summary>
     [AddComponentMenu("EasyFramework/UI/Display")]
     [DisallowMultipleComponent, RequireComponent(typeof(RectTransform))]
     public sealed class UIDisplay : UIBindingRoot
     {
         [SerializeField] private UIPageKind _kind;
-        [SerializeField] private string _prefabLocation;
-        [SerializeField] private bool _closeOnBack = true;
-        [SerializeField] private bool _closeOnBackground;
         [SerializeField] private Color _backgroundColor = new(0f, 0f, 0f, 0.55f);
         private UIObject _logic;
         private UIManager _manager;
 
+        /// <summary>此 Prefab 使用的页面或列表项类型。</summary>
         public override UIPageKind Kind => _kind;
-        public override string PrefabLocation => _prefabLocation;
-        public bool CloseOnBack => _closeOnBack;
-        public bool CloseOnBackground => _closeOnBackground;
+        /// <summary>弹窗共享遮罩所用的颜色。</summary>
         public Color BackgroundColor => _backgroundColor;
         internal override UIObject RuntimeView => _logic;
         internal bool IsClosing { get; set; }
 
-        public void Configure(UIPageKind kind, string typeName, string scriptGuid, string address)
+        /// <summary>配置 Prefab 的界面类型和 View 绑定。</summary>
+        /// <param name="kind">页面或列表项的类型。</param>
+        /// <param name="typeName">View 的完整类型名。</param>
+        /// <param name="scriptGuid">View 脚本的资产 GUID。</param>
+        public void Configure(UIPageKind kind, string typeName, string scriptGuid)
         {
             if (kind == UIPageKind.Node) throw new ArgumentException("请用 UINode 挂载独立组件。", nameof(kind));
             _kind = kind;
             SetViewScript(typeName, scriptGuid);
-            _prefabLocation = address;
         }
 
         public T GetItem<T>() where T : UIItem
